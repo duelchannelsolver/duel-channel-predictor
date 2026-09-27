@@ -34,11 +34,18 @@ strength model trained (in-browser, on page load) from `data/matches.json`.
 
 ## Known limitations (read before trusting this)
 
-- **Search bands, icon size, and OCR crop are estimated from ~3 example
-  screenshots**, not a large verified set. If detection still misses
-  icons, widen the left/right band boxes or adjust "icon size %"; if it
-  finds false positives (e.g. matching the round-number fire graphic),
-  narrow the bands or raise the match threshold.
+- **Matching now uses color, mean-centered, with border cropping** to fix a
+  specific failure mode: raw-grayscale cosine similarity was dominated by
+  the circular border every queue icon shares (which the wiki sprite
+  templates don't have), causing very different-looking enemies to all
+  match the same wrong template. If misclassifications persist, try
+  adjusting the `innerCropFrac` values in `detect.js` (currently 0.6 for
+  candidate windows, 0.85 for templates) or increasing `THUMB` (currently
+  24px) for more detail at the cost of speed.
+- **Search bands, icon size, and OCR crop are estimated from a handful of
+  example screenshots**, not a large verified set. If detection still
+  misses icons, widen the left/right band boxes or adjust "icon size %"; if
+  it finds false positives, narrow the bands or raise the match threshold.
 - **Performance**: sliding a window across a band at every stride, against
   every known enemy template, is O(positions x templates) -- fine for ~100
   enemies and a modest band, but if it feels slow, shrink the band size or

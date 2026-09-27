@@ -15,7 +15,7 @@ async function loadTemplates(enemyNames) {
   for (const name of enemyNames) {
     try {
       const img = await loadImage(`sprites/${name}.png`);
-      templates.push({ name, data: toGrayThumb(img) });
+      templates.push({ name, data: toColorThumb(img, 0.85) });
     } catch {
       // Sprite not downloaded yet for this enemy -- skip silently.
     }
@@ -32,18 +32,48 @@ function loadImage(src) {
   });
 }
 
-function toGrayThumb(imgOrCanvas) {
+function toColorThumb(imgOrCanvas, innerCropFrac = 1.0) {
+  // Crop to the central square region first (innerCropFrac < 1 strips
+  // outer pixels -- used to exclude the circular border/frame that every
+  // in-game queue icon has but the wiki sprite templates don't, since that
+  // shared border was dominating the comparison over actual content).
+  const srcW = imgOrCanvas.naturalWidth || imgOrCanvas.width;
+  const srcH = imgOrCanvas.naturalHeight || imgOrCanvas.height;
+  const cropW = srcW * innerCropFrac;
+  const cropH = srcH * innerCropFrac;
+  const cropX = (srcW - cropW) / 2;
+  const cropY = (srcH - cropH) / 2;
+
   const c = document.createElement("canvas");
   c.width = THUMB;
   c.height = THUMB;
   const ctx = c.getContext("2d");
-  ctx.drawImage(imgOrCanvas, 0, 0, THUMB, THUMB);
+  ctx.drawImage(imgOrCanvas, cropX, cropY, cropW, cropH, 0, 0, THUMB, THUMB);
   const { data } = ctx.getImageData(0, 0, THUMB, THUMB);
-  const gray = new Float32Array(THUMB * THUMB);
-  for (let i = 0; i < gray.length; i++) {
-    gray[i] = (data[i * 4] + data[i * 4 + 1] + data[i * 4 + 2]) / 3;
+
+  // Color (R,G,B), not collapsed to grayscale -- brightness alone doesn't
+  // separate e.g. a light-colored enemy from a dark one if their shape
+  // pattern happens to be similar, but color usually will.
+  const n = THUMB * THUMB;
+  const vec = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    vec[i] = data[i * 4];
+    vec[n + i] = data[i * 4 + 1];
+    vec[2 * n + i] = data[i * 4 + 2];
   }
-  return gray;
+
+  // Mean-center each channel. This is the key fix for the "everything
+  // matches the same template" symptom: without it, cosine similarity is
+  // dominated by whatever low-frequency pattern (like a border ring) is
+  // common across all icons; centering removes that shared component and
+  // leaves only the actual distinguishing variation.
+  for (const offset of [0, n, 2 * n]) {
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += vec[offset + i];
+    mean /= n;
+    for (let i = 0; i < n; i++) vec[offset + i] -= mean;
+  }
+  return vec;
 }
 
 function cropToCanvas(sourceCanvas, x, y, w, h) {
@@ -100,7 +130,7 @@ async function detectSide(sourceCanvas, band, templates, iconSize, threshold = 0
   for (let x = band.x; x + iconSize <= band.x + band.w; x += stride) {
     for (let y = band.y; y + iconSize <= band.y + band.h; y += stride) {
       const windowCanvas = cropToCanvas(sourceCanvas, x, y, iconSize, iconSize);
-      const windowThumb = toGrayThumb(windowCanvas);
+      const windowThumb = toColorThumb(windowCanvas, 0.6);
 
       let best = null;
       for (const t of templates) {

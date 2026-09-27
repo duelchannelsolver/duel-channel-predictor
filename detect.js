@@ -65,14 +65,14 @@ function similarity(a, b) {
   return dot / Math.sqrt(na * nb);
 }
 
-// Reads the small "xN" badge in an icon slot via OCR. Crops the
-// bottom-right portion of the slot (where the badge sits) and upscales it,
-// since OCR does much better on larger text. Returns 1 if unreadable.
+// Reads the small "xN" badge in an icon slot via OCR. The badge sits
+// bottom-center under each icon (not bottom-right), so crop most of the
+// slot's width but only its bottom portion, then upscale for OCR.
 async function readCount(slotCanvas) {
-  const bx = slotCanvas.width * 0.45;
-  const by = slotCanvas.height * 0.6;
+  const bx = slotCanvas.width * 0.1;
+  const by = slotCanvas.height * 0.65;
   const badge = cropToCanvas(
-    slotCanvas, bx, by, slotCanvas.width - bx, slotCanvas.height - by
+    slotCanvas, bx, by, slotCanvas.width * 0.8, slotCanvas.height - by
   );
   const upscaled = cropToCanvas(badge, 0, 0, badge.width, badge.height);
   upscaled.width = badge.width * 4;

@@ -1,16 +1,15 @@
 let model = null;
 let currentImage = null;
 
-function getRegions() {
+function getDetectionConfig() {
   const w = currentImage.naturalWidth,
     h = currentImage.naturalHeight;
   const pct = (id) => Number(document.getElementById(id).value) / 100;
-  const slots = (id) => Number(document.getElementById(id).value);
   return {
-    left: { x: pct("lx") * w, y: pct("ly") * h, w: pct("lw") * w, h: pct("lh") * h },
-    right: { x: pct("rx") * w, y: pct("ry") * h, w: pct("rw") * w, h: pct("rh") * h },
-    leftSlots: slots("lslots"),
-    rightSlots: slots("rslots"),
+    leftBand: { x: pct("lx") * w, y: pct("ly") * h, w: pct("lw") * w, h: pct("lh") * h },
+    rightBand: { x: pct("rx") * w, y: pct("ry") * h, w: pct("rw") * w, h: pct("rh") * h },
+    iconSize: pct("iconSize") * w,
+    threshold: Number(document.getElementById("threshold").value),
   };
 }
 
@@ -45,7 +44,7 @@ function readTeam(containerId) {
 
 async function runDetection() {
   document.getElementById("status").textContent = "Detecting enemies…";
-  const { left, right } = await detectEnemies(currentImage, getRegions(), model.enemies);
+  const { left, right } = await detectEnemies(currentImage, getDetectionConfig(), model.enemies);
   renderTeam("teamAList", "A", left);
   renderTeam("teamBList", "B", right);
   document.getElementById("results").style.display = "block";

@@ -1,12 +1,12 @@
-// Enemy detector, v2: targets the round-queue strip near the bottom center
-// of the screen (icon + "xN" badge for each enemy type in that round),
-// rather than scanning the whole battlefield. These icons are clean,
-// static renders -- much closer to the wiki sprite art than in-motion
-// battlefield sprites -- and the count is printed right next to each one,
-// so OCR replaces the old "count defaults to 1" guess.
+// Enemy detector, v3: instead of fixed per-slot boxes (which broke once
+// icon count/position varied between rounds -- more enemies push the row
+// wider from center), this slides the same template-match window across a
+// broad search band on each side and keeps local best-matches, similar in
+// spirit to "find the circles" but reusing the matcher we already have
+// instead of a separate geometric circle-detection pass.
 //
-// Still an MVP: slot spacing/count and the OCR crop box are unverified
-// against enough real screenshots. Detections are editable, not final.
+// Still an MVP: search-band bounds, icon size, and OCR crop are estimated
+// from a couple of example screenshots, not a large verified set.
 
 const THUMB = 24; // template/window comparison size
 
@@ -65,14 +65,12 @@ function similarity(a, b) {
   return dot / Math.sqrt(na * nb);
 }
 
-// Reads the small "xN" badge in an icon slot via OCR. The badge sits
-// bottom-center under each icon (not bottom-right), so crop most of the
-// slot's width but only its bottom portion, then upscale for OCR.
-async function readCount(slotCanvas) {
-  const bx = slotCanvas.width * 0.1;
-  const by = slotCanvas.height * 0.65;
+// Reads the "xN" badge, which sits just below/overlapping the bottom of
+// each icon. Crops a band starting partway down the icon and extending
+// below it, then upscales for OCR. Returns 1 if unreadable.
+async function readCount(sourceCanvas, x, y, size) {
   const badge = cropToCanvas(
-    slotCanvas, bx, by, slotCanvas.width * 0.8, slotCanvas.height - by
+    sourceCanvas, x, y + size * 0.75, size, size * 0.55
   );
   const upscaled = cropToCanvas(badge, 0, 0, badge.width, badge.height);
   upscaled.width = badge.width * 4;
@@ -86,38 +84,54 @@ async function readCount(slotCanvas) {
     const match = text.match(/(\d+)/);
     return match ? parseInt(match[1], 10) : 1;
   } catch {
-    return 1; // OCR unavailable or failed -- fall back to a manual-edit default.
+    return 1;
   }
 }
 
-// region: {x, y, w, h} in source-canvas pixel coords, bounding just the
-// row of enemy icons on one side of the round counter. maxSlots divides
-// the width evenly; slots with no confident template match are dropped.
-async function detectSide(sourceCanvas, region, templates, maxSlots, threshold = 0.85) {
-  const slotW = region.w / maxSlots;
-  const results = [];
-  for (let i = 0; i < maxSlots; i++) {
-    const slotCanvas = cropToCanvas(
-      sourceCanvas, region.x + i * slotW, region.y, slotW, region.h
-    );
-    const slotThumb = toGrayThumb(slotCanvas);
+// Slides an icon-sized window across `band` (a wide search area, not a
+// precise slot box) at the given stride, scoring every position against
+// every template. Keeps local maxima above `threshold` via simple
+// non-max suppression on x-overlap, so multiple distinct icons in the
+// same band are each found once regardless of exact spacing.
+async function detectSide(sourceCanvas, band, templates, iconSize, threshold = 0.85) {
+  const stride = iconSize / 3;
+  const candidates = [];
 
-    let best = null;
-    for (const t of templates) {
-      const score = similarity(slotThumb, t.data);
-      if (score >= threshold && (!best || score > best.score)) {
-        best = { name: t.name, score };
+  for (let x = band.x; x + iconSize <= band.x + band.w; x += stride) {
+    for (let y = band.y; y + iconSize <= band.y + band.h; y += stride) {
+      const windowCanvas = cropToCanvas(sourceCanvas, x, y, iconSize, iconSize);
+      const windowThumb = toGrayThumb(windowCanvas);
+
+      let best = null;
+      for (const t of templates) {
+        const score = similarity(windowThumb, t.data);
+        if (score >= threshold && (!best || score > best.score)) {
+          best = { name: t.name, score };
+        }
       }
+      if (best) candidates.push({ x, y, ...best });
     }
-    if (best) {
-      const count = await readCount(slotCanvas);
-      results.push({ slot: i, ...best, count });
-    }
+  }
+
+  // Non-max suppression: sort best-first, drop anything overlapping (in x)
+  // a already-kept, higher-scoring detection by more than half an icon.
+  candidates.sort((a, b) => b.score - a.score);
+  const kept = [];
+  for (const c of candidates) {
+    const overlaps = kept.some((k) => Math.abs(k.x - c.x) < iconSize * 0.5);
+    if (!overlaps) kept.push(c);
+  }
+  kept.sort((a, b) => a.x - b.x); // left-to-right, matches on-screen order
+
+  const results = [];
+  for (const k of kept) {
+    const count = await readCount(sourceCanvas, k.x, k.y, iconSize);
+    results.push({ name: k.name, score: k.score, count });
   }
   return results;
 }
 
-async function detectEnemies(imageEl, regions, enemyNames) {
+async function detectEnemies(imageEl, config, enemyNames) {
   const canvas = document.createElement("canvas");
   canvas.width = imageEl.naturalWidth;
   canvas.height = imageEl.naturalHeight;
@@ -125,8 +139,8 @@ async function detectEnemies(imageEl, regions, enemyNames) {
 
   const templates = await loadTemplates(enemyNames);
   const [left, right] = await Promise.all([
-    detectSide(canvas, regions.left, templates, regions.leftSlots),
-    detectSide(canvas, regions.right, templates, regions.rightSlots),
+    detectSide(canvas, config.leftBand, templates, config.iconSize, config.threshold),
+    detectSide(canvas, config.rightBand, templates, config.iconSize, config.threshold),
   ]);
   return { left, right };
 }

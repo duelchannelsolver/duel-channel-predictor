@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Duel Channel Predictor</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <h1>Duel Channel Predictor</h1>
+  <p id="status">Loading and training model on <span id="matchCount">…</span> matches…</p>
+
+  <section id="paste-area" tabindex="0">
+    Paste a screenshot here (Ctrl/Cmd+V), or
+    <input type="file" id="fileInput" accept="image/*" />
+  </section>
+
+  <canvas id="preview" style="display:none"></canvas>
+
+  <section id="regionControls">
+    <p>These bound the row of enemy icons+counts next to the round-number fire icon at the bottom (values are % of image size). Adjust if detection misses:</p>
+    <label>Left strip: x<input id="lx" type="number" value="30" size="3">% y<input id="ly" type="number" value="88" size="3">% w<input id="lw" type="number" value="18" size="3">% h<input id="lh" type="number" value="9" size="3">% slots<input id="lslots" type="number" value="3" size="2"></label><br>
+    <label>Right strip: x<input id="rx" type="number" value="52" size="3">% y<input id="ry" type="number" value="88" size="3">% w<input id="rw" type="number" value="18" size="3">% h<input id="rh" type="number" value="9" size="3">% slots<input id="rslots" type="number" value="3" size="2"></label>
+    <button id="redetect">Re-detect</button>
+  </section>
+
+  <section id="results" style="display:none">
+    <h2>Detected teams (edit names/counts if wrong, then Predict)</h2>
+    <div class="teams">
+      <div>
+        <h3>Team A (left)</h3>
+        <div id="teamAList"></div>
+        <button class="addRow" data-side="A">+ add enemy</button>
+      </div>
+      <div>
+        <h3>Team B (right)</h3>
+        <div id="teamBList"></div>
+        <button class="addRow" data-side="B">+ add enemy</button>
+      </div>
+    </div>
+    <button id="predictBtn">Predict</button>
+    <h2 id="predictionOutput"></h2>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="model.js"></script>
+  <script src="detect.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

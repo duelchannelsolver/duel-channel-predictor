@@ -1,0 +1,400 @@
+[
+ {
+  "teamA": {
+   "Big Snowball Thrower": 4
+  },
+  "teamB": {
+   "Rubber Bullet Sniper": 18
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Dirty Duelist": 4
+  },
+  "teamB": {
+   "Coldhands Caster": 12
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Volatile Originium Slug": 25
+  },
+  "teamB": {
+   "Coldhands Caster": 14
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Amplifying Caster": 6
+  },
+  "teamB": {
+   "Criminal Funboat": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Manifestation of Suffering": 3,
+   "Insufficient Sleep": 6
+  },
+  "teamB": {
+   "Mech Crocodile": 9,
+   "Rainbowvore Blade": 4
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Knights Together Strong": 1
+  },
+  "teamB": {
+   "Shield of Blood": 3,
+   "Snotty Slug": 31
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Hound Pro": 49,
+   "Plastic Wrap Knight": 15
+  },
+  "teamB": {
+   "Lamplighter Knight": 6,
+   "Unemployed Saxophonist": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Super Blast Robo": 2
+  },
+  "teamB": {
+   "Miasma Swarm": 5
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Rubber Bullet Sniper": 22
+  },
+  "teamB": {
+   "Pompeii": 2
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Spear of Mutation": 6
+  },
+  "teamB": {
+   "Insufficient Sleep": 5,
+   "Super Punch Robo": 1
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Rainbowvore Blade": 3,
+   "Volatile Originium Slug": 19
+  },
+  "teamB": {
+   "Miasma Swarm": 10
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Dirty Duelist": 3,
+   "Spear of Mutation": 5
+  },
+  "teamB": {
+   "Chocolate Custard Slug": 23,
+   "Snotty Slug": 24
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chivalrous Trio": 1
+  },
+  "teamB": {
+   "Pacifist": 4,
+   "Self-Destruct Ice Slug": 18
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Starving Vanguard": 3,
+   "Big Snowball Thrower": 4
+  },
+  "teamB": {
+   "Prickly Rocks": 6,
+   "Trebuchet": 2
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Big Snowball Thrower": 5,
+   "Relaxed Burdenbeast": 4
+  },
+  "teamB": {
+   "Prickly Rocks": 7,
+   "Plastic Wrap Knight": 15
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Portal": 3,
+   "Starving Vanguard": 3,
+   "Mutant Carnivorous Plant": 3
+  },
+  "teamB": {
+   "Amplifying Caster": 5,
+   "Master Boxer": 12
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Jesselton Williams": 1,
+   "Starry Magician": 11,
+   "Hound Pro": 46
+  },
+  "teamB": {
+   "Resort Off-road Vehicle": 7,
+   "Prickly Rocks": 5,
+   "Knights Together Strong": 1
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Mortar Shell Thrower": 3
+  },
+  "teamB": {
+   "Lamplighter Knight": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Miasma Swarm": 6
+  },
+  "teamB": {
+   "Big Spider Sprayer": 4
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Plastic Wrap Knight": 9,
+   "Master Boxer": 7
+  },
+  "teamB": {
+   "Starry Magician": 13
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Explosive Seed": 41
+  },
+  "teamB": {
+   "Mutant Carnivorous Plant": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Volatile Originium Slug": 16,
+   "Coldhands Caster": 10
+  },
+  "teamB": {
+   "Resort Off-road Vehicle": 5,
+   "Lost Cadence": 5
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Quilon": 1
+  },
+  "teamB": {
+   "Criminal Funboat": 4,
+   "Big Spider Sprayer": 5
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Explosive Seed": 28,
+   "Manifestation of Suffering": 5
+  },
+  "teamB": {
+   "Grenade Mercenary": 7,
+   "Big Snowball Thrower": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Master Boxer": 14,
+   "Plastic Wrap Knight": 14
+  },
+  "teamB": {
+   "Former Sailor": 7,
+   "Shield of Blood": 3
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Miasma Swarm": 10,
+   "Criminal Funboat": 3
+  },
+  "teamB": {
+   "Tornado Ninja": 6,
+   "Unemployed Saxophonist": 6
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Volatile Originium Slug": 21
+  },
+  "teamB": {
+   "Starry Magician": 11
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chocolate Custard Slug": 17,
+   "Prickly Rocks": 3
+  },
+  "teamB": {
+   "Relaxed Burdenbeast": 2,
+   "Insufficient Sleep": 4
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Amplifying Caster": 3,
+   "Big Spider Sprayer": 3
+  },
+  "teamB": {
+   "Coldhands Caster": 16
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Mortar Shell Thrower": 3,
+   "Mutant Carnivorous Plant": 3
+  },
+  "teamB": {
+   "Starry Magician": 11,
+   "Manifestation of Suffering": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Sui-Xiang": 1
+  },
+  "teamB": {
+   "Criminal Funboat": 3,
+   "Master Boxer": 13
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Snotty Slug": 29,
+   "Jesselton Williams": 1
+  },
+  "teamB": {
+   "Tiny Hermit Crab": 12,
+   "Tornado Ninja": 3
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Amplifying Caster": 4,
+   "Plastic Wrap Knight": 15
+  },
+  "teamB": {
+   "Tornado Ninja": 5,
+   "Lamplighter Knight": 6
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Plastic Wrap Knight": 15,
+   "Prickly Rocks": 7
+  },
+  "teamB": {
+   "Coldhands Caster": 12,
+   "Grenade Mercenary": 6,
+   "Mech Crocodile": 6
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Miasma Swarm": 7,
+   "Lost Cadence": 6,
+   "Jesselton Williams": 2
+  },
+  "teamB": {
+   "Plastic Wrap Knight": 16,
+   "Tiny Hermit Crab": 11,
+   "Manifestation of Suffering": 4
+  },
+  "winner": "A",
+  "storm": true
+ }
+]

@@ -133,7 +133,7 @@ async function loadAndTrain() {
     
     console.log("Fetching matches.json...");
     // Ensure the path is correct for your GitHub Pages deployment
-    const response = await fetch('matches.json'); 
+    const response = await fetch('data/matches.json');
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}. Check if matches.json exists at this URL.`);

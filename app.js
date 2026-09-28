@@ -110,6 +110,9 @@ fetch("data/matches.json")
       datalist.appendChild(opt);
     });
     document.body.appendChild(datalist);
+    // Start loading sprite templates + the OCR engine in the background so
+    // the first paste doesn't have to wait for them.
+    warmUp(model.enemies);
     document.getElementById("status").textContent =
       `Model trained on ${matches.length} matches (${model.enemies.length} enemies). Paste a screenshot to begin.`;
   });

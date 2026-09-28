@@ -6,18 +6,29 @@ strength model trained (in-browser, on page load) from `data/matches.json`.
 
 ## Setup
 
-1. Run `download_duel_channel_sprites.py` (from earlier) and copy the
-   downloaded `.png` files into `sprites/` here, named exactly as they
-   appear in your training data (e.g. `sprites/Big Snowball Thrower.png`).
-   Only enemies that appear in `data/matches.json` are used as templates --
-   the model can't usefully weigh in on an enemy it hasn't seen a match for
-   anyway.
-2. Whenever you add more logged matches, regenerate `data/matches.json`
-   from your Excel workbook (reuse the `_parse_side`/loader logic from
-   `duel_channel_model.py`) and commit the updated file.
-3. Push this folder to a GitHub repo and enable GitHub Pages (Settings ->
-   Pages -> deploy from branch). No build step needed -- it's static
-   HTML/JS.
+1. Run `download_duel_channel_sprites.py`, then move the downloaded PNGs into
+   a folder called `sprites_full/` here (it's git-ignored, so the big files
+   never get committed).
+2. Run `pip install pillow` then `python make_small_sprites.py`. This writes
+   64x64 copies into `sprites/`, which is what the site actually loads and
+   what you commit. Full-size sprites made the page download and decode far
+   more data than the 24x24 comparison ever uses.
+   Sprite filenames must match the enemy names in your training data
+   exactly (e.g. `sprites/Big Snowball Thrower.png`). Only enemies present
+   in `data/matches.json` are used as templates.
+3. Whenever you add more logged matches, regenerate `data/matches.json`
+   from your Excel workbook and commit the updated file.
+4. Push this folder to a GitHub repo and enable GitHub Pages (Settings ->
+   Pages -> deploy from branch). No build step needed.
+
+## Performance notes
+
+- Sprite templates load in parallel and are cached; the OCR engine is one
+  shared worker. Both start warming up as soon as the page loads.
+- Open the browser console (F12) after pasting a screenshot: it logs how
+  many templates loaded (`templates loaded: X of Y` -- if X is much smaller
+  than Y, sprite filenames don't match your enemy names) and total detection
+  time.
 
 ## How it works
 

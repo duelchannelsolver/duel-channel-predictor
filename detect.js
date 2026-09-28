@@ -10,17 +10,53 @@
 
 const THUMB = 24; // template/window comparison size
 
-async function loadTemplates(enemyNames) {
-  const templates = [];
-  for (const name of enemyNames) {
-    try {
-      const img = await loadImage(`sprites/${name}.png`);
-      templates.push({ name, data: toColorThumb(img, 0.85) });
-    } catch {
-      // Sprite not downloaded yet for this enemy -- skip silently.
-    }
+// Templates are loaded in parallel (not one-at-a-time) and cached, so the
+// cost is paid once per page load instead of on every detection.
+let templatesPromise = null;
+
+function getTemplates(enemyNames) {
+  if (!templatesPromise) {
+    templatesPromise = (async () => {
+      const loaded = await Promise.all(
+        enemyNames.map(async (name) => {
+          try {
+            const img = await loadImage(`sprites/${name}.png`);
+            return { name, data: toColorThumb(img, 0.85) };
+          } catch {
+            return null; // sprite missing for this enemy -- skip
+          }
+        })
+      );
+      return loaded.filter(Boolean);
+    })();
   }
-  return templates;
+  return templatesPromise;
+}
+
+// One shared OCR worker, created once. Tesseract.recognize() by itself
+// builds a fresh worker (reloading WASM + language data) on every call,
+// which is very slow when called once per detected icon.
+let ocrWorkerPromise = null;
+
+function getOcrWorker() {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = (async () => {
+      const worker = await Tesseract.createWorker("eng");
+      await worker.setParameters({
+        tessedit_char_whitelist: "0123456789",
+        tessedit_pageseg_mode: "7", // treat the crop as a single line of text
+      });
+      return worker;
+    })();
+  }
+  return ocrWorkerPromise;
+}
+
+// Call once after the model loads so templates + OCR are ready (or at
+// least underway) before the user pastes their first screenshot.
+function warmUp(enemyNames) {
+  getTemplates(enemyNames);
+  getOcrWorker().catch(() => {});
 }
 
 function loadImage(src) {
@@ -108,9 +144,8 @@ async function readCount(sourceCanvas, x, y, size) {
   upscaled.getContext("2d").drawImage(badge, 0, 0, upscaled.width, upscaled.height);
 
   try {
-    const { data: { text } } = await Tesseract.recognize(upscaled, "eng", {
-      tessedit_char_whitelist: "0123456789x\u00d7",
-    });
+    const worker = await getOcrWorker();
+    const { data: { text } } = await worker.recognize(upscaled);
     const match = text.match(/(\d+)/);
     return match ? parseInt(match[1], 10) : 1;
   } catch {
@@ -151,6 +186,9 @@ async function detectSide(sourceCanvas, band, templates, iconSize, threshold = 0
     const overlaps = kept.some((k) => Math.abs(k.x - c.x) < iconSize * 0.5);
     if (!overlaps) kept.push(c);
   }
+  // Duel Channel shows at most 3 enemy types per side, so anything beyond
+  // the 3 best matches is a false positive (and would cost extra OCR calls).
+  kept.length = Math.min(kept.length, 3);
   kept.sort((a, b) => a.x - b.x); // left-to-right, matches on-screen order
 
   const results = [];
@@ -167,10 +205,13 @@ async function detectEnemies(imageEl, config, enemyNames) {
   canvas.height = imageEl.naturalHeight;
   canvas.getContext("2d").drawImage(imageEl, 0, 0);
 
-  const templates = await loadTemplates(enemyNames);
+  console.time("detect");
+  const templates = await getTemplates(enemyNames);
+  console.log(`templates loaded: ${templates.length} of ${enemyNames.length}`);
   const [left, right] = await Promise.all([
     detectSide(canvas, config.leftBand, templates, config.iconSize, config.threshold),
     detectSide(canvas, config.rightBand, templates, config.iconSize, config.threshold),
   ]);
+  console.timeEnd("detect");
   return { left, right };
 }

@@ -89,7 +89,7 @@ document.querySelectorAll(".addRow").forEach((btn) => {
 document.getElementById("predictBtn").addEventListener("click", () => {
   const teamA = readTeam("teamAList");
   const teamB = readTeam("teamBList");
-  const p = predictProba(model, teamA, teamB);
+  const p = model.predictProba(teamA, teamB);
   document.getElementById("predictionOutput").textContent =
     `P(Team A wins) = ${(p * 100).toFixed(1)}%  |  P(Team B wins) = ${((1 - p) * 100).toFixed(1)}%`;
 });

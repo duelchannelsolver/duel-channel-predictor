@@ -101,7 +101,7 @@ fetch("data/matches.json")
   .then((matches) => {
     document.getElementById("matchCount").textContent = matches.length;
     model = new EnemyStrengthModel(1.0, 0.75);
-    myModel.fit(matches, 500);
+    model.fit(matches, 500);
     // Populate the <datalist> so enemy-name text inputs autocomplete.
     const datalist = document.createElement("datalist");
     datalist.id = "enemyNames";

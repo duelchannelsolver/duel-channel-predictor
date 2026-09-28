@@ -1,3 +1,7 @@
+/**
+ * EnemyStrengthModel
+ * Predicts the probability of Team A winning a duel based on unit composition.
+ */
 class EnemyStrengthModel {
   constructor(l2 = 1.0, stormWeight = 0.5) {
     this.l2 = l2;
@@ -7,6 +11,11 @@ class EnemyStrengthModel {
   }
 
   fit(matches, iters = 500) {
+    if (!matches || matches.length === 0) {
+      console.error("Training failed: No matches provided.");
+      return;
+    }
+
     // 1. Build unique enemy list
     const enemySet = new Set();
     matches.forEach(m => {
@@ -18,23 +27,27 @@ class EnemyStrengthModel {
     const n = matches.length;
     const d = this.enemies.length;
     
-    // 2. Strict Typed Arrays (Float64Array) prevent V8 de-optimization cliffs
-    // A 1D flattened array is used for maximum memory access speed
+    // 2. Strict Typed Arrays prevent browser engine de-optimization
     const X = new Float64Array(n * d);
     const y = new Float64Array(n);
     const sw = new Float64Array(n);
 
+    // 3. Parse and sanitize data
     for (let s = 0; s < n; s++) {
       const m = matches[s];
       y[s] = m.winner === "A" ? 1 : 0;
       
-      // Look explicitly for the "storm" key matching your JSON schema
+      // Match the "storm" boolean from matches.json
       sw[s] = m.storm === true ? this.stormWeight : 1.0; 
 
       for (let j = 0; j < d; j++) {
         const enemy = this.enemies[j];
-        const countA = (m.teamA && m.teamA[enemy]) ? m.teamA[enemy] : 0;
-        const countB = (m.teamB && m.teamB[enemy]) ? m.teamB[enemy] : 0;
+        
+        // parseInt guarantees we don't accidentally do string concatenation 
+        // which causes the NaN / Infinity math cascades that freeze the browser
+        const countA = parseInt((m.teamA && m.teamA[enemy]) || 0, 10);
+        const countB = parseInt((m.teamB && m.teamB[enemy]) || 0, 10);
+        
         X[s * d + j] = countA - countB;
       }
     }
@@ -46,6 +59,7 @@ class EnemyStrengthModel {
     
     const beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8, lr = 0.1;
 
+    // 4. Training Loop (Adam Optimizer)
     for (let it = 1; it <= iters; it++) {
       grad.fill(0);
 
@@ -56,7 +70,7 @@ class EnemyStrengthModel {
           z += weights[j] * X[offset + j];
         }
         
-        // Mathematical bounds check to prevent Infinity/NaN cascades
+        // Safe Sigmoid bounds check
         let p;
         if (z > 20) p = 1;
         else if (z < -20) p = 0;
@@ -85,7 +99,7 @@ class EnemyStrengthModel {
       }
     }
     
-    // Store final weights as a standard array for UI interactions
+    // Store final weights as a standard JavaScript array
     this.weights = Array.from(weights);
   }
 
@@ -101,10 +115,57 @@ class EnemyStrengthModel {
     let z = 0;
     for (let i = 0; i < this.enemies.length; i++) {
       const enemy = this.enemies[i];
-      const countA = teamA[enemy] || 0;
-      const countB = teamB[enemy] || 0;
+      const countA = parseInt(teamA[enemy] || 0, 10);
+      const countB = parseInt(teamB[enemy] || 0, 10);
       z += this.weights[i] * (countA - countB);
     }
     return 1 / (1 + Math.exp(-z));
   }
 }
+
+/**
+ * Initializes the pipeline: Fetches matches.json, trains the model, 
+ * and makes it available to the global window for UI usage.
+ */
+async function loadAndTrain() {
+  try {
+    console.time("Total Load & Train Time");
+    
+    console.log("Fetching matches.json...");
+    // Ensure the path is correct for your GitHub Pages deployment
+    const response = await fetch('matches.json'); 
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}. Check if matches.json exists at this URL.`);
+    }
+    
+    const matches = await response.json();
+    console.log(`Successfully parsed ${matches.length} matches.`);
+
+    console.log("Starting model training...");
+    const model = new EnemyStrengthModel(1.0, 0.5);
+    
+    // Train the model with 500 iterations
+    model.fit(matches, 500); 
+    
+    console.timeEnd("Total Load & Train Time");
+    
+    // Expose the fully trained model to the global window object 
+    // so you can use `window.duelModel.predictProba(...)` in your UI buttons.
+    window.duelModel = model;
+    
+    // Print the sorted tier list to the console to verify it worked
+    const strengths = model.strengths();
+    const sortedEnemies = Object.keys(strengths).sort((a, b) => strengths[b] - strengths[a]);
+    console.log("Training complete. Top enemies by strength:");
+    sortedEnemies.slice(0, 10).forEach(enemy => {
+      console.log(`  ${enemy}: ${strengths[enemy].toFixed(3)}`);
+    });
+
+  } catch (error) {
+    console.error("CRITICAL FAILURE in loadAndTrain:", error);
+  }
+}
+
+// Automatically execute when the script loads
+loadAndTrain();

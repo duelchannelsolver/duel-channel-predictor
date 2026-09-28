@@ -3,7 +3,7 @@
  * Predicts the probability of Team A winning a duel based on unit composition.
  */
 class EnemyStrengthModel {
-  constructor(l2 = 1.0, stormWeight = 0.5) {
+  constructor(l2 = 1.0, stormWeight = 0.75) {
     this.l2 = l2;
     this.stormWeight = stormWeight;
     this.enemies = [];
@@ -48,7 +48,7 @@ class EnemyStrengthModel {
         const countA = parseInt((m.teamA && m.teamA[enemy]) || 0, 10);
         const countB = parseInt((m.teamB && m.teamB[enemy]) || 0, 10);
         
-        X[s * d + j] = countA - countB;
+        X[s * d + j] = Math.sqrt(countA) - Math.sqrt(countB);;
       }
     }
 
@@ -117,7 +117,7 @@ class EnemyStrengthModel {
       const enemy = this.enemies[i];
       const countA = parseInt(teamA[enemy] || 0, 10);
       const countB = parseInt(teamB[enemy] || 0, 10);
-      z += this.weights[i] * (countA - countB);
+      z += this.weights[i] * (Math.sqrt(countA) - Math.sqrt(countB));
     }
     return 1 / (1 + Math.exp(-z));
   }

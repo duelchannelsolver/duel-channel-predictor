@@ -2,15 +2,16 @@
 //
 // The queue is always 3 slots per side (fixed positions, filled from the
 // centre outwards), sitting a fixed distance below a faint horizontal line
-// (~rgb(111,114,109)). Everything is expressed as a fraction of image WIDTH,
-// so it works across resolutions/aspect ratios:
+// (~rgb(111,114,109)). The game UI scales with a blend of width and height
+// (Unity-style match=0.5), so all distances are expressed in units of
+// U = sqrt(width * height). Verified on 1918x1078, 1486x805 and 2400x1080
+// screenshots (aspect ratios 1.78 - 2.22):
 //   1. find the faint line  -> gives the vertical anchor
 //   2. 6 fixed slot centres -> no sliding window
 //   3. skip empty slots (low pixel variance)
 //   4. classify with alpha-masked, multi-scale NCC against the sprites
 //   5. OCR the "xN" badge after binarizing the white text
 //
-// Fractions were measured from two screenshots (1918x1078, 1486x805).
 // Tune via the `config` argument if needed.
 
 const SZ = 24;                 // comparison size (px)
@@ -18,17 +19,17 @@ const MASK_R = SZ * 0.42;      // ignore the icon's border ring
 const SCALES = [0.5, 0.7, 0.9, 1.15];        // <1 = zoomed in on the sprite
 const SHIFTS = [[0, 0], [0, -0.15], [0, 0.15]]; // [dx, dy] as fraction of view
 
-const SLOT_X = {               // slot centre offset from image centre, / width
-  left:  [-0.2007, -0.145, -0.0889],   // outer -> inner
-  right: [0.0889, 0.145, 0.2007],      // inner -> outer
+const SLOT_X = {               // slot centre offset from image centre, in U
+  left:  [-0.2685, -0.1930, -0.1188],  // outer -> inner
+  right: [0.1188, 0.1930, 0.2685],     // inner -> outer
 };
 
 const DEFAULTS = {
   lineColor: [111, 114, 109],
-  lineTol: 45,            // sum of |dR|+|dG|+|dB| allowed
-  centerBelowLine: 0.036, // slot centre y = lineY + this * width
-  diameter: 0.054,        // icon diameter / width
-  fallbackCenterY: 0.92,  // * height, only if the line isn't found
+  lineTol: 60,            // sum of |dR|+|dG|+|dB| allowed
+  centerBelowLine: 0.0485, // slot centre y = lineY + this * U
+  diameter: 0.070,         // icon diameter, in U
+  fallbackCenterY: 0.90,   // * height, only if the line isn't found
   emptyStd: 28,           // luminance std-dev below this => empty slot
   minScore: 0.30,         // best NCC below this => unknown, skipped
   debug: true,
@@ -180,12 +181,14 @@ async function readCount(src, cx, cy, D, side) {
 // -------------------------------------------------------------- geometry
 
 // Finds the row (in the bottom quarter, central band) whose pixels best
-// match the faint line colour. Skips the centre where the ROUND badge
-// covers the line.
-function findLineY(canvas, cfg) {
+// match the faint line colour. The line spans about +-0.285U from the
+// centre; we sample 0.09U..0.27U on each side, skipping the middle where
+// the ROUND badge / flame covers it.
+function findLineY(canvas, cfg, U) {
   const W = canvas.width, H = canvas.height;
   const y0 = Math.floor(H * 0.75);
-  const x0 = Math.round(W * 0.29), x1 = Math.round(W * 0.71);
+  const x0 = Math.max(0, Math.round(W / 2 - 0.27 * U));
+  const x1 = Math.min(W, Math.round(W / 2 + 0.27 * U));
   const w = x1 - x0, h = H - y0;
   const { data } = canvas.getContext("2d").getImageData(x0, y0, w, h);
   const [tr, tg, tb] = cfg.lineColor;
@@ -194,7 +197,7 @@ function findLineY(canvas, cfg) {
   for (let y = 0; y < h; y++) {
     let hit = 0, tot = 0;
     for (let x = 0; x < w; x++) {
-      if (Math.abs(x0 + x - W / 2) < W * 0.07) continue;
+      if (Math.abs(x0 + x - W / 2) < 0.09 * U) continue;
       tot++;
       const i = (y * w + x) * 4;
       const diff = Math.abs(data[i] - tr) + Math.abs(data[i + 1] - tg) + Math.abs(data[i + 2] - tb);
@@ -204,7 +207,7 @@ function findLineY(canvas, cfg) {
     if (frac > bestFrac) { bestFrac = frac; bestY = y0 + y; }
   }
   console.log(`line search: y=${bestY}, match fraction=${bestFrac.toFixed(2)}`);
-  return bestFrac > 0.35 ? bestY : null;
+  return bestFrac > 0.3 ? bestY : null;
 }
 
 function getPatch(canvas, cx, cy, D) {
@@ -277,9 +280,10 @@ async function detectEnemies(imageEl, config = {}, enemyNames) {
   const templates = await getTemplates(enemyNames);
   console.log(`templates loaded: ${templates.length} of ${enemyNames.length}`);
 
-  const lineY = findLineY(canvas, cfg);
-  const cy = lineY != null ? lineY + cfg.centerBelowLine * W : H * cfg.fallbackCenterY;
-  const D = cfg.diameter * W;
+  const U = Math.sqrt(W * H);
+  const lineY = findLineY(canvas, cfg, U);
+  const cy = lineY != null ? lineY + cfg.centerBelowLine * U : H * cfg.fallbackCenterY;
+  const D = cfg.diameter * U;
   if (lineY == null) console.warn("faint line not found; using fallback y");
 
   const out = { left: [], right: [] };
@@ -287,7 +291,7 @@ async function detectEnemies(imageEl, config = {}, enemyNames) {
 
   for (const side of ["left", "right"]) {
     for (let i = 0; i < 3; i++) {
-      const cx = W / 2 + SLOT_X[side][i] * W;
+      const cx = W / 2 + SLOT_X[side][i] * U;
       const patch = getPatch(canvas, cx, cy, D);
       const log = { side, slot: i, cx: Math.round(cx), cy: Math.round(cy), std: +patch.std.toFixed(1) };
 
@@ -319,7 +323,7 @@ async function detectEnemies(imageEl, config = {}, enemyNames) {
     g.drawImage(canvas, 0, 0);
     g.lineWidth = Math.max(2, W / 600);
     g.font = `${Math.round(W / 60)}px sans-serif`;
-    if (lineY != null) { g.strokeStyle = "yellow"; g.beginPath(); g.moveTo(W * 0.29, lineY); g.lineTo(W * 0.71, lineY); g.stroke(); }
+    if (lineY != null) { g.strokeStyle = "yellow"; g.beginPath(); g.moveTo(W / 2 - 0.27 * U, lineY); g.lineTo(W / 2 + 0.27 * U, lineY); g.stroke(); }
     for (const s of slotLog) {
       g.strokeStyle = s.result === "ok" ? "lime" : s.result === "empty" ? "gray" : "red";
       g.beginPath(); g.arc(s.cx, s.cy, D / 2, 0, Math.PI * 2); g.stroke();

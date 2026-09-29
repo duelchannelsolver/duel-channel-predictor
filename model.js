@@ -10,7 +10,7 @@ class EnemyStrengthModel {
     this.weights = [];
   }
 
-  fit(matches, iters = 500) {
+  fit(matches, iters = 1000) {
     if (!matches || matches.length === 0) {
       console.error("Training failed: No matches provided.");
       return;
@@ -145,8 +145,8 @@ async function loadAndTrain() {
     console.log("Starting model training...");
     const model = new EnemyStrengthModel(1.0, 0.5);
     
-    // Train the model with 500 iterations
-    model.fit(matches, 500); 
+    // Train the model with 1000 iterations
+    model.fit(matches, 1000); 
     
     console.timeEnd("Total Load & Train Time");
     

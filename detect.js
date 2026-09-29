@@ -2,10 +2,9 @@
 //
 // The queue is always 3 slots per side (fixed positions, filled from the
 // centre outwards), sitting a fixed distance below a faint horizontal line
-// (~rgb(111,114,109)). The game UI scales with a blend of width and height
-// (Unity-style match=0.5), so all distances are expressed in units of
-// U = sqrt(width * height). Verified on 1918x1078, 1486x805 and 2400x1080
-// screenshots (aspect ratios 1.78 - 2.22):
+// (~rgb(111,114,109)). All distances are fractions of image WIDTH. Verified
+// on 1918x1078, 1486x807 and 1918x1198 screenshots. Ultrawide (20:9)
+// screenshots are NOT supported: there the UI scales differently.
 //   1. find the faint line  -> gives the vertical anchor
 //   2. 6 fixed slot centres -> no sliding window
 //   3. skip empty slots (low pixel variance)
@@ -16,22 +15,25 @@
 
 const SZ = 24;                 // comparison size (px)
 const MASK_R = SZ * 0.42;      // ignore the icon's border ring
-const SCALES = [0.5, 0.7, 0.9, 1.15];        // <1 = zoomed in on the sprite
-const SHIFTS = [[0, 0], [0, -0.15], [0, 0.15]]; // [dx, dy] as fraction of view
+// Scale is relative to the sprite's VISIBLE bounding box (transparent padding
+// removed): 1 = longest side of the visible sprite fills the window, <1 =
+// zoomed in. In-game icons are tight portraits, so we mostly want <= 1.
+const SCALES = [0.55, 0.7, 0.85, 1.0, 1.25];
+const SHIFTS = [[0, 0], [0, -0.15], [0, 0.15], [-0.15, 0], [0.15, 0]]; // [dx, dy]
 
-const SLOT_X = {               // slot centre offset from image centre, in U
-  left:  [-0.2685, -0.1930, -0.1188],  // outer -> inner
-  right: [0.1188, 0.1930, 0.2685],     // inner -> outer
+const SLOT_X = {               // slot centre offset from image centre, / width
+  left:  [-0.2007, -0.145, -0.0889],   // outer -> inner
+  right: [0.0889, 0.145, 0.2007],      // inner -> outer
 };
 
 const DEFAULTS = {
   lineColor: [111, 114, 109],
   lineTol: 60,            // sum of |dR|+|dG|+|dB| allowed
-  centerBelowLine: 0.0485, // slot centre y = lineY + this * U
-  diameter: 0.070,         // icon diameter, in U
+  centerBelowLine: 0.036,  // slot centre y = lineY + this * width
+  diameter: 0.054,         // icon diameter / width
   fallbackCenterY: 0.90,   // * height, only if the line isn't found
   emptyStd: 28,           // luminance std-dev below this => empty slot
-  minScore: 0.30,         // best NCC below this => unknown, skipped
+  minScore: 0.60,         // best NCC below this => unknown, skipped (real icons score 0.85+)
   debug: true,
 };
 
@@ -83,11 +85,33 @@ function toVec(canvas) {
 
 // Renders the sprite zoomed by `s`, shifted by (dx,dy), onto a transparent
 // SZxSZ canvas. Alpha is kept so transparent sprite background is ignored.
+// Crops a sprite to the bounding box of its non-transparent pixels.
+function alphaCrop(img) {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  g.drawImage(img, 0, 0);
+  const { data } = g.getImageData(0, 0, w, h);
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * 4 + 3] > 24) {
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < 0) return img; // fully transparent?? leave as is
+  return cropToCanvas(c, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+}
+
 function makeVariant(img, s, dx, dy) {
-  const side = Math.max(img.naturalWidth, img.naturalHeight);
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const side = Math.max(iw, ih);
   const k = SZ / (s * side);
-  const w = img.naturalWidth * k;
-  const h = img.naturalHeight * k;
+  const w = iw * k;
+  const h = ih * k;
   const c = document.createElement("canvas");
   c.width = c.height = SZ;
   c.getContext("2d").drawImage(
@@ -103,7 +127,7 @@ function getTemplates(enemyNames) {
       const loaded = await Promise.all(
         enemyNames.map(async (name) => {
           try {
-            const img = await loadImage(`sprites/${name}.png`);
+            const img = alphaCrop(await loadImage(`sprites/${name}.png`));
             const variants = [];
             for (const s of SCALES)
               for (const [dx, dy] of SHIFTS)
@@ -144,28 +168,72 @@ function warmUp(enemyNames) {
 
 // The badge sits at the bottom, on the side facing the screen centre
 // (right of left-side icons, left of right-side icons). Its text is white
-// with a dark outline, so we keep only near-white pixels -> black on white.
+// with a dark outline. Steps:
+//   1. build a "whiteness" map (min of R,G,B) of the crop
+//   2. drop the small leading "x" glyph (Tesseract merges it with a thin
+//      "1" and reads "x1" as "4")
+//   3. upscale the smooth map 4x, THEN threshold -> clean black-on-white
 async function readCount(src, cx, cy, D, side) {
   const x0 = side === "left" ? cx + 0.05 * D : cx - 0.75 * D;
   const crop = cropToCanvas(src, x0, cy + 0.22 * D, 0.7 * D, 0.5 * D);
-  const ctx = crop.getContext("2d");
-  const img = ctx.getImageData(0, 0, crop.width, crop.height);
-  const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const v = Math.min(d[i], d[i + 1], d[i + 2]) > 200 ? 0 : 255;
-    d[i] = d[i + 1] = d[i + 2] = v;
-    d[i + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
+  const cw = crop.width, ch = crop.height;
+  const px = crop.getContext("2d").getImageData(0, 0, cw, ch).data;
 
-  const PAD = 20, UP = 4;
+  const white = new Uint8ClampedArray(cw * ch);
+  const colOn = new Uint8Array(cw);
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const i = (y * cw + x) * 4;
+      const v = Math.min(px[i], px[i + 1], px[i + 2]);
+      white[y * cw + x] = v;
+      if (v > 200) colOn[x] = 1;
+    }
+  }
+  // column runs of text pixels; the first run is the "x" if it's narrow
+  const runs = [];
+  let start = -1;
+  for (let x = 0; x <= cw; x++) {
+    const on = x < cw && colOn[x];
+    if (on && start < 0) start = x;
+    if (!on && start >= 0) { runs.push([start, x]); start = -1; }
+  }
+  let skip = 0;
+  if (runs.length >= 2 && runs[0][1] - runs[0][0] <= 0.15 * D) {
+    skip = Math.max(0, runs[1][0] - 2);
+  }
+
+  const w2 = cw - skip;
+  const gray = document.createElement("canvas");
+  gray.width = w2; gray.height = ch;
+  const gctx = gray.getContext("2d");
+  const gid = gctx.createImageData(w2, ch);
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < w2; x++) {
+      const v = white[y * cw + skip + x];
+      const i = (y * w2 + x) * 4;
+      gid.data[i] = gid.data[i + 1] = gid.data[i + 2] = v;
+      gid.data[i + 3] = 255;
+    }
+  }
+  gctx.putImageData(gid, 0, 0);
+
+  const UP = 4, PAD = 20;
   const big = document.createElement("canvas");
-  big.width = crop.width * UP + PAD * 2;
-  big.height = crop.height * UP + PAD * 2;
+  big.width = w2 * UP + PAD * 2;
+  big.height = ch * UP + PAD * 2;
   const bctx = big.getContext("2d");
-  bctx.fillStyle = "#fff";
+  bctx.fillStyle = "#000"; // padding becomes white after the threshold below
   bctx.fillRect(0, 0, big.width, big.height);
-  bctx.drawImage(crop, PAD, PAD, crop.width * UP, crop.height * UP);
+  bctx.imageSmoothingEnabled = true;
+  bctx.imageSmoothingQuality = "high";
+  bctx.drawImage(gray, PAD, PAD, w2 * UP, ch * UP);
+  const bid = bctx.getImageData(0, 0, big.width, big.height);
+  for (let i = 0; i < bid.data.length; i += 4) {
+    const v = bid.data[i] > 170 ? 0 : 255; // white text -> black
+    bid.data[i] = bid.data[i + 1] = bid.data[i + 2] = v;
+    bid.data[i + 3] = 255;
+  }
+  bctx.putImageData(bid, 0, 0);
 
   try {
     const worker = await getOcrWorker();
@@ -181,14 +249,13 @@ async function readCount(src, cx, cy, D, side) {
 // -------------------------------------------------------------- geometry
 
 // Finds the row (in the bottom quarter, central band) whose pixels best
-// match the faint line colour. The line spans about +-0.285U from the
-// centre; we sample 0.09U..0.27U on each side, skipping the middle where
+// match the faint line colour. The line spans about +-0.215W from the
+// centre; we sample 0.07W..0.21W on each side, skipping the middle where
 // the ROUND badge / flame covers it.
-function findLineY(canvas, cfg, U) {
+function findLineY(canvas, cfg) {
   const W = canvas.width, H = canvas.height;
   const y0 = Math.floor(H * 0.75);
-  const x0 = Math.max(0, Math.round(W / 2 - 0.27 * U));
-  const x1 = Math.min(W, Math.round(W / 2 + 0.27 * U));
+  const x0 = Math.round(W * 0.29), x1 = Math.round(W * 0.71);
   const w = x1 - x0, h = H - y0;
   const { data } = canvas.getContext("2d").getImageData(x0, y0, w, h);
   const [tr, tg, tb] = cfg.lineColor;
@@ -197,7 +264,7 @@ function findLineY(canvas, cfg, U) {
   for (let y = 0; y < h; y++) {
     let hit = 0, tot = 0;
     for (let x = 0; x < w; x++) {
-      if (Math.abs(x0 + x - W / 2) < 0.09 * U) continue;
+      if (Math.abs(x0 + x - W / 2) < W * 0.07) continue;
       tot++;
       const i = (y * w + x) * 4;
       const diff = Math.abs(data[i] - tr) + Math.abs(data[i + 1] - tg) + Math.abs(data[i + 2] - tb);
@@ -280,10 +347,9 @@ async function detectEnemies(imageEl, config = {}, enemyNames) {
   const templates = await getTemplates(enemyNames);
   console.log(`templates loaded: ${templates.length} of ${enemyNames.length}`);
 
-  const U = Math.sqrt(W * H);
-  const lineY = findLineY(canvas, cfg, U);
-  const cy = lineY != null ? lineY + cfg.centerBelowLine * U : H * cfg.fallbackCenterY;
-  const D = cfg.diameter * U;
+  const lineY = findLineY(canvas, cfg);
+  const cy = lineY != null ? lineY + cfg.centerBelowLine * W : H * cfg.fallbackCenterY;
+  const D = cfg.diameter * W;
   if (lineY == null) console.warn("faint line not found; using fallback y");
 
   const out = { left: [], right: [] };
@@ -291,7 +357,7 @@ async function detectEnemies(imageEl, config = {}, enemyNames) {
 
   for (const side of ["left", "right"]) {
     for (let i = 0; i < 3; i++) {
-      const cx = W / 2 + SLOT_X[side][i] * U;
+      const cx = W / 2 + SLOT_X[side][i] * W;
       const patch = getPatch(canvas, cx, cy, D);
       const log = { side, slot: i, cx: Math.round(cx), cy: Math.round(cy), std: +patch.std.toFixed(1) };
 
@@ -323,7 +389,7 @@ async function detectEnemies(imageEl, config = {}, enemyNames) {
     g.drawImage(canvas, 0, 0);
     g.lineWidth = Math.max(2, W / 600);
     g.font = `${Math.round(W / 60)}px sans-serif`;
-    if (lineY != null) { g.strokeStyle = "yellow"; g.beginPath(); g.moveTo(W / 2 - 0.27 * U, lineY); g.lineTo(W / 2 + 0.27 * U, lineY); g.stroke(); }
+    if (lineY != null) { g.strokeStyle = "yellow"; g.beginPath(); g.moveTo(W * 0.29, lineY); g.lineTo(W * 0.71, lineY); g.stroke(); }
     for (const s of slotLog) {
       g.strokeStyle = s.result === "ok" ? "lime" : s.result === "empty" ? "gray" : "red";
       g.beginPath(); g.arc(s.cx, s.cy, D / 2, 0, Math.PI * 2); g.stroke();

@@ -168,11 +168,66 @@ function warmUp(enemyNames) {
 
 // The badge sits at the bottom, on the side facing the screen centre
 // (right of left-side icons, left of right-side icons). Its text is white
-// with a dark outline. Steps:
-//   1. build a "whiteness" map (min of R,G,B) of the crop
+// with a dark outline. Pipeline (each step fixed a real failure):
+//   1. "whiteness" map (min of R,G,B) of the crop
 //   2. drop the small leading "x" glyph (Tesseract merges it with a thin
 //      "1" and reads "x1" as "4")
-//   3. upscale the smooth map 4x, THEN threshold -> clean black-on-white
+//   3. crop tightly to the digits and scale to a fixed glyph height
+//      (a small glyph in a big blank canvas made tesseract.js return "")
+//   4. threshold, then thin the fat outlined strokes by 1px (the game's
+//      bold "6" was unreadable to tesseract.js until thinned)
+// If OCR still returns nothing, retry with different settings before
+// falling back to 1.
+const OCR_ATTEMPTS = [
+  { height: 64, thr: 170, erode: 1 },
+  { height: 40, thr: 190, erode: 1 },
+  { height: 48, thr: 150, erode: 2 },
+  { height: 48, thr: 170, erode: 0 },
+];
+
+function erode3x3(ink, w, h) {
+  const out = new Uint8Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      let all = 1;
+      for (let dy = -1; dy <= 1 && all; dy++)
+        for (let dx = -1; dx <= 1; dx++)
+          if (!ink[(y + dy) * w + x + dx]) { all = 0; break; }
+      out[y * w + x] = all;
+    }
+  }
+  return out;
+}
+
+// gray: canvas of the tight whiteness crop. Returns a black-on-white canvas.
+function renderForOcr(gray, { height, thr, erode }) {
+  const PAD = 30;
+  const scale = height / gray.height;
+  const tw = Math.max(1, Math.round(gray.width * scale));
+  const th = height;
+  const big = document.createElement("canvas");
+  big.width = tw + PAD * 2;
+  big.height = th + PAD * 2;
+  const g = big.getContext("2d");
+  g.fillStyle = "#000"; // padding becomes white after thresholding
+  g.fillRect(0, 0, big.width, big.height);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(gray, PAD, PAD, tw, th);
+
+  const id = g.getImageData(0, 0, big.width, big.height);
+  let ink = new Uint8Array(big.width * big.height);
+  for (let i = 0; i < ink.length; i++) ink[i] = id.data[i * 4] > thr ? 1 : 0;
+  for (let k = 0; k < erode; k++) ink = erode3x3(ink, big.width, big.height);
+  for (let i = 0; i < ink.length; i++) {
+    const v = ink[i] ? 0 : 255; // white text -> black
+    id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v;
+    id.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(id, 0, 0);
+  return big;
+}
+
 async function readCount(src, cx, cy, D, side) {
   const x0 = side === "left" ? cx + 0.05 * D : cx - 0.75 * D;
   const crop = cropToCanvas(src, x0, cy + 0.22 * D, 0.7 * D, 0.5 * D);
@@ -202,48 +257,45 @@ async function readCount(src, cx, cy, D, side) {
     skip = Math.max(0, runs[1][0] - 2);
   }
 
-  const w2 = cw - skip;
-  const gray = document.createElement("canvas");
-  gray.width = w2; gray.height = ch;
-  const gctx = gray.getContext("2d");
-  const gid = gctx.createImageData(w2, ch);
+  // tight bounding box of the remaining text pixels
+  let bx0 = cw, bx1 = -1, by0 = ch, by1 = -1;
   for (let y = 0; y < ch; y++) {
-    for (let x = 0; x < w2; x++) {
-      const v = white[y * cw + skip + x];
-      const i = (y * w2 + x) * 4;
+    for (let x = skip; x < cw; x++) {
+      if (white[y * cw + x] > 200) {
+        if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+        if (y < by0) by0 = y; if (y > by1) by1 = y;
+      }
+    }
+  }
+  if (bx1 < 0) return 1;
+  bx0 = Math.max(skip, bx0 - 1); by0 = Math.max(0, by0 - 1);
+  bx1 = Math.min(cw - 1, bx1 + 1); by1 = Math.min(ch - 1, by1 + 1);
+  const gw = bx1 - bx0 + 1, gh = by1 - by0 + 1;
+
+  const gray = document.createElement("canvas");
+  gray.width = gw; gray.height = gh;
+  const gctx = gray.getContext("2d");
+  const gid = gctx.createImageData(gw, gh);
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const v = white[(by0 + y) * cw + bx0 + x];
+      const i = (y * gw + x) * 4;
       gid.data[i] = gid.data[i + 1] = gid.data[i + 2] = v;
       gid.data[i + 3] = 255;
     }
   }
   gctx.putImageData(gid, 0, 0);
 
-  const UP = 4, PAD = 20;
-  const big = document.createElement("canvas");
-  big.width = w2 * UP + PAD * 2;
-  big.height = ch * UP + PAD * 2;
-  const bctx = big.getContext("2d");
-  bctx.fillStyle = "#000"; // padding becomes white after the threshold below
-  bctx.fillRect(0, 0, big.width, big.height);
-  bctx.imageSmoothingEnabled = true;
-  bctx.imageSmoothingQuality = "high";
-  bctx.drawImage(gray, PAD, PAD, w2 * UP, ch * UP);
-  const bid = bctx.getImageData(0, 0, big.width, big.height);
-  for (let i = 0; i < bid.data.length; i += 4) {
-    const v = bid.data[i] > 170 ? 0 : 255; // white text -> black
-    bid.data[i] = bid.data[i + 1] = bid.data[i + 2] = v;
-    bid.data[i + 3] = 255;
-  }
-  bctx.putImageData(bid, 0, 0);
-
   try {
     const worker = await getOcrWorker();
-    const { data: { text } } = await worker.recognize(big);
-    const clean = text.replace(/[^0-9xX\u00d7]/g, "");
-    const m = clean.match(/[xX\u00d7](\d+)/) || clean.match(/(\d+)/);
-    return m ? parseInt(m[1], 10) : 1;
-  } catch {
-    return 1;
-  }
+    for (const attempt of OCR_ATTEMPTS) {
+      const { data: { text } } = await worker.recognize(renderForOcr(gray, attempt));
+      const clean = text.replace(/[^0-9xX\u00d7]/g, "");
+      const m = clean.match(/[xX\u00d7](\d+)/) || clean.match(/(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    }
+  } catch { /* fall through */ }
+  return 1;
 }
 
 // -------------------------------------------------------------- geometry

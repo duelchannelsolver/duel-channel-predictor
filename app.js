@@ -1,5 +1,8 @@
 let model = null;
 let currentImage = null;
+// Every enemy the detector may recognise: all sprites in sprites/ (via
+// sprites/manifest.json), including ones with no match history yet.
+let spriteNames = [];
 let detectionRun = 0; // guards against an older detection finishing after a newer one
 
 // detect.js v4 finds the icon row by itself (faint line + fixed slots), so
@@ -44,19 +47,54 @@ function readTeam(containerId) {
   return team;
 }
 
+// Splits a team into enemies the model has history for and ones it has never
+// seen (recognised from sprites, but no matches recorded yet).
+function splitByHistory(team) {
+  const known = new Set(model.enemies);
+  const kept = {}, unseen = {};
+  for (const [name, count] of Object.entries(team)) {
+    (known.has(name) ? kept : unseen)[name] = count;
+  }
+  return { kept, unseen };
+}
+
+function setPredictionNote(text) {
+  let note = document.getElementById("predictionNote");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "predictionNote";
+    note.style.cssText = "font-size:0.85em;opacity:0.75;margin-top:4px";
+    document.getElementById("predictionOutput").insertAdjacentElement("afterend", note);
+  }
+  note.textContent = text;
+}
+
 // Team A = left team, Team B = right team (internal naming only).
 function updatePrediction() {
   const out = document.getElementById("predictionOutput");
   if (!model) return;
-  const left = readTeam("teamAList");
-  const right = readTeam("teamBList");
-  if (!Object.keys(left).length || !Object.keys(right).length) {
+  setPredictionNote("");
+  const L = splitByHistory(readTeam("teamAList"));
+  const R = splitByHistory(readTeam("teamBList"));
+  const ignoredText = [
+    ...Object.entries(L.unseen).map(([n, c]) => `${n} ×${c} (left)`),
+    ...Object.entries(R.unseen).map(([n, c]) => `${n} ×${c} (right)`),
+  ].join(", ");
+
+  const leftAny = Object.keys(L.kept).length + Object.keys(L.unseen).length;
+  const rightAny = Object.keys(R.kept).length + Object.keys(R.unseen).length;
+  if (!leftAny || !rightAny) {
     out.textContent = "Add at least one enemy to each team to see a prediction.";
+    return;
+  }
+  if (!Object.keys(L.kept).length || !Object.keys(R.kept).length) {
+    out.textContent = "Not enough match history to predict this matchup.";
+    if (ignoredText) setPredictionNote(`No match history yet for: ${ignoredText}`);
     return;
   }
   let p;
   try {
-    p = model.predictProba(left, right); // P(left team wins)
+    p = model.predictProba(L.kept, R.kept); // P(left team wins)
   } catch {
     out.textContent = "Couldn't compute a prediction -- check the enemy names.";
     return;
@@ -68,6 +106,9 @@ function updatePrediction() {
   } else {
     out.textContent = `Winner: Right Team, ${((1 - p) * 100).toFixed(1)}%`;
   }
+  if (ignoredText) {
+    setPredictionNote(`Not counted (no match history yet): ${ignoredText}`);
+  }
 }
 
 async function runDetection() {
@@ -75,7 +116,7 @@ async function runDetection() {
   const status = document.getElementById("status");
   status.textContent = "Detecting enemies…";
   try {
-    const { left, right } = await detectEnemies(currentImage, getDetectionConfig(), model.enemies);
+    const { left, right } = await detectEnemies(currentImage, getDetectionConfig(), spriteNames);
     if (run !== detectionRun) return; // a newer screenshot was pasted meanwhile
     renderTeam("teamAList", left);
     renderTeam("teamBList", right);
@@ -207,22 +248,112 @@ function hideTrainingStats() {
   }
 }
 
+// ------------------------------------------------------------ copy to Excel
+
+// One spreadsheet row, tab-separated, matching the columns:
+//   Left Enemy 1 | # | Left Enemy 2 | # | Left Enemy 3 | #
+//   Right Enemy A | # | Right Enemy B | # | Right Enemy C | #
+// Empty slots become empty cells (so trailing tabs are intentional).
+const SLOTS_PER_SIDE = 3;
+
+function teamToCells(team) {
+  const entries = Object.entries(team).slice(0, SLOTS_PER_SIDE); // on-screen order
+  const cells = [];
+  for (let i = 0; i < SLOTS_PER_SIDE; i++) {
+    cells.push(entries[i] ? entries[i][0] : "", entries[i] ? String(entries[i][1]) : "");
+  }
+  return cells;
+}
+
+function buildExcelRow() {
+  const left = readTeam("teamAList");
+  const right = readTeam("teamBList");
+  const overflow =
+    Math.max(0, Object.keys(left).length - SLOTS_PER_SIDE) +
+    Math.max(0, Object.keys(right).length - SLOTS_PER_SIDE);
+  return {
+    text: [...teamToCells(left), ...teamToCells(right)].join("\t"),
+    empty: !Object.keys(left).length && !Object.keys(right).length,
+    overflow,
+  };
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // Fallback for non-HTTPS / older browsers.
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  if (!ok) throw new Error("copy failed");
+}
+
+function setupCopyButton() {
+  const anchor = document.getElementById("predictionOutput");
+  if (!anchor) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "copyExcelBtn";
+  btn.textContent = "Copy for Excel";
+  btn.style.marginTop = "8px";
+  let timer = null;
+  const flash = (msg) => {
+    btn.textContent = msg;
+    clearTimeout(timer);
+    timer = setTimeout(() => (btn.textContent = "Copy for Excel"), 1800);
+  };
+  btn.addEventListener("click", async () => {
+    const { text, empty, overflow } = buildExcelRow();
+    if (empty) return flash("Nothing to copy");
+    try {
+      await copyText(text);
+      flash(overflow ? `Copied (${overflow} extra enemy type(s) left out)` : "Copied!");
+    } catch (err) {
+      console.error(err);
+      flash("Copy failed");
+    }
+  });
+  anchor.insertAdjacentElement("afterend", btn);
+}
+
 relabelTeams();
 setupAdvancedSettings();
+setupCopyButton();
 hidePredictButton();
 hideTrainingStats();
+
+// Reads sprites/manifest.json (see scripts/make-sprite-manifest.js). Falls
+// back to just the enemies from the match data if it isn't there.
+async function loadSpriteNames(modelEnemies) {
+  try {
+    const r = await fetch("sprites/manifest.json");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const list = await r.json();
+    return [...new Set([...list, ...modelEnemies])].sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    console.warn("sprites/manifest.json unavailable; only enemies with match history can be detected.", err);
+    return modelEnemies;
+  }
+}
 
 // Train on page load -- fast enough (well under a second for ~100 rows) to
 // not need precomputed weights.
 fetch("data/matches.json")
   .then((r) => r.json())
-  .then((matches) => {
+  .then(async (matches) => {
     model = new EnemyStrengthModel(1.0, 0.75);
     model.fit(matches, 1000);
+    spriteNames = await loadSpriteNames(model.enemies);
     // Populate the <datalist> so enemy-name text inputs autocomplete.
     const datalist = document.createElement("datalist");
     datalist.id = "enemyNames";
-    model.enemies.forEach((name) => {
+    spriteNames.forEach((name) => {
       const opt = document.createElement("option");
       opt.value = name;
       datalist.appendChild(opt);
@@ -230,6 +361,6 @@ fetch("data/matches.json")
     document.body.appendChild(datalist);
     // Start loading sprite templates + the OCR engine in the background so
     // the first paste doesn't have to wait for them.
-    warmUp(model.enemies);
+    warmUp(spriteNames);
     document.getElementById("status").textContent = "Paste a screenshot to begin.";
   });

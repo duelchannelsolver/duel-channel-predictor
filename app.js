@@ -1,19 +1,15 @@
 let model = null;
 let currentImage = null;
+let detectionRun = 0; // guards against an older detection finishing after a newer one
 
+// detect.js v4 finds the icon row by itself (faint line + fixed slots), so
+// there is nothing to configure here. debug:false skips the console table
+// and overlay canvas.
 function getDetectionConfig() {
-  const w = currentImage.naturalWidth,
-    h = currentImage.naturalHeight;
-  const pct = (id) => Number(document.getElementById(id).value) / 100;
-  return {
-    leftBand: { x: pct("lx") * w, y: pct("ly") * h, w: pct("lw") * w, h: pct("lh") * h },
-    rightBand: { x: pct("rx") * w, y: pct("ry") * h, w: pct("rw") * w, h: pct("rh") * h },
-    iconSize: pct("iconSize") * w,
-    threshold: Number(document.getElementById("threshold").value),
-  };
+  return { debug: false };
 }
 
-function renderTeam(containerId, side, detections) {
+function renderTeam(containerId, detections) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
   detections.forEach((d) => addEnemyRow(container, d.name, d.count));
@@ -24,10 +20,16 @@ function addEnemyRow(container, name = "", count = 1) {
   const row = document.createElement("div");
   row.className = "enemyRow";
   row.innerHTML = `
-    <input type="text" list="enemyNames" value="${name}" placeholder="enemy name">
-    <input type="number" min="1" value="${count}">
+    <input type="text" list="enemyNames" placeholder="enemy name">
+    <input type="number" min="1">
     <button class="removeRow">x</button>`;
-  row.querySelector(".removeRow").onclick = () => row.remove();
+  const [nameInput, countInput] = row.querySelectorAll("input");
+  nameInput.value = name; // set as properties so quotes in names can't break the markup
+  countInput.value = count;
+  row.querySelector(".removeRow").onclick = () => {
+    row.remove();
+    updatePrediction();
+  };
   container.appendChild(row);
 }
 
@@ -42,14 +44,49 @@ function readTeam(containerId) {
   return team;
 }
 
+// Team A = left team, Team B = right team (internal naming only).
+function updatePrediction() {
+  const out = document.getElementById("predictionOutput");
+  if (!model) return;
+  const left = readTeam("teamAList");
+  const right = readTeam("teamBList");
+  if (!Object.keys(left).length || !Object.keys(right).length) {
+    out.textContent = "Add at least one enemy to each team to see a prediction.";
+    return;
+  }
+  let p;
+  try {
+    p = model.predictProba(left, right); // P(left team wins)
+  } catch {
+    out.textContent = "Couldn't compute a prediction -- check the enemy names.";
+    return;
+  }
+  if (Math.abs(p - 0.5) < 0.0005) {
+    out.textContent = "Winner: Toss-up, 50.0%";
+  } else if (p > 0.5) {
+    out.textContent = `Winner: Left Team, ${(p * 100).toFixed(1)}%`;
+  } else {
+    out.textContent = `Winner: Right Team, ${((1 - p) * 100).toFixed(1)}%`;
+  }
+}
+
 async function runDetection() {
-  document.getElementById("status").textContent = "Detecting enemies…";
-  const { left, right } = await detectEnemies(currentImage, getDetectionConfig(), model.enemies);
-  renderTeam("teamAList", "A", left);
-  renderTeam("teamBList", "B", right);
-  document.getElementById("results").style.display = "block";
-  document.getElementById("status").textContent =
-    "Detection is best-effort -- please check/edit names and counts before predicting.";
+  const run = ++detectionRun;
+  const status = document.getElementById("status");
+  status.textContent = "Detecting enemies…";
+  try {
+    const { left, right } = await detectEnemies(currentImage, getDetectionConfig(), model.enemies);
+    if (run !== detectionRun) return; // a newer screenshot was pasted meanwhile
+    renderTeam("teamAList", left);
+    renderTeam("teamBList", right);
+    document.getElementById("results").style.display = "block";
+    updatePrediction(); // predict immediately
+    status.textContent =
+      "Detection is best-effort -- please check/edit names and counts.";
+  } catch (err) {
+    console.error(err);
+    if (run === detectionRun) status.textContent = "Detection failed -- see the console for details.";
+  }
 }
 
 function handleImage(imgSrc) {
@@ -86,20 +123,100 @@ document.querySelectorAll(".addRow").forEach((btn) => {
   });
 });
 
-document.getElementById("predictBtn").addEventListener("click", () => {
-  const teamA = readTeam("teamAList");
-  const teamB = readTeam("teamBList");
-  const p = model.predictProba(teamA, teamB);
-  document.getElementById("predictionOutput").textContent =
-    `P(Team A wins) = ${(p * 100).toFixed(1)}%  |  P(Team B wins) = ${((1 - p) * 100).toFixed(1)}%`;
+// Keep the prediction live while the user corrects names/counts.
+["teamAList", "teamBList"].forEach((id) => {
+  document.getElementById(id).addEventListener("input", updatePrediction);
+  document.getElementById(id).addEventListener("change", updatePrediction);
 });
+
+// --------------------------------------------------------------- page setup
+
+// "Team A"/"Team B" -> "Left Team"/"Right Team" everywhere in the page text.
+function relabelTeams() {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    const tag = n.parentElement && n.parentElement.tagName;
+    if (tag === "SCRIPT" || tag === "STYLE" || tag === "TEXTAREA") continue;
+    const t = n.nodeValue.replace(/\bTeam A\b/g, "Left Team").replace(/\bTeam B\b/g, "Right Team");
+    if (t !== n.nodeValue) n.nodeValue = t;
+  }
+  document.title = document.title.replace(/\bTeam A\b/g, "Left Team").replace(/\bTeam B\b/g, "Right Team");
+}
+
+// Moves the band / icon-size / threshold controls behind an
+// "Advanced Settings" toggle button (collapsed by default).
+function setupAdvancedSettings() {
+  const ids = ["lx", "ly", "lw", "lh", "rx", "ry", "rw", "rh", "iconSize", "threshold"];
+  const inputs = ids.map((id) => document.getElementById(id)).filter(Boolean);
+  if (!inputs.length) return;
+
+  const mustStayVisible = ["fileInput", "redetect", "results", "status", "predictBtn"]
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.id = "advancedToggle";
+  toggle.textContent = "Advanced Settings";
+  toggle.setAttribute("aria-expanded", "false");
+  const panel = document.createElement("div");
+  panel.id = "advancedPanel";
+  panel.style.display = "none";
+  toggle.addEventListener("click", () => {
+    const open = panel.style.display === "none";
+    panel.style.display = open ? "" : "none";
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+
+  // Best case: the controls live in their own block -> move the whole block.
+  let box = inputs[0].parentElement;
+  while (box && !inputs.every((el) => box.contains(el))) box = box.parentElement;
+  const isolated =
+    box && box !== document.body && !mustStayVisible.some((el) => box.contains(el));
+
+  if (isolated) {
+    box.parentNode.insertBefore(toggle, box);
+    box.parentNode.insertBefore(panel, box);
+    panel.appendChild(box);
+  } else {
+    // Otherwise move each control's own row (its <label> or parent element).
+    const rows = [...new Set(inputs.map((el) => el.closest("label") || el.parentElement))];
+    rows[0].parentNode.insertBefore(toggle, rows[0]);
+    rows[0].parentNode.insertBefore(panel, rows[0]);
+    rows.forEach((r) => panel.appendChild(r));
+  }
+}
+
+// Auto-predict makes the manual button redundant.
+function hidePredictButton() {
+  const btn = document.getElementById("predictBtn");
+  if (btn) btn.style.display = "none";
+}
+
+// The page no longer advertises training-set size.
+function hideTrainingStats() {
+  const el = document.getElementById("matchCount");
+  if (!el) return;
+  const host = el.parentElement;
+  if (host && host !== document.body && host.textContent.length < 150) {
+    host.style.display = "none";
+  } else {
+    el.style.display = "none";
+  }
+}
+
+relabelTeams();
+setupAdvancedSettings();
+hidePredictButton();
+hideTrainingStats();
 
 // Train on page load -- fast enough (well under a second for ~100 rows) to
 // not need precomputed weights.
 fetch("data/matches.json")
   .then((r) => r.json())
   .then((matches) => {
-    document.getElementById("matchCount").textContent = matches.length;
     model = new EnemyStrengthModel(1.0, 0.75);
     model.fit(matches, 1000);
     // Populate the <datalist> so enemy-name text inputs autocomplete.
@@ -114,6 +231,5 @@ fetch("data/matches.json")
     // Start loading sprite templates + the OCR engine in the background so
     // the first paste doesn't have to wait for them.
     warmUp(model.enemies);
-    document.getElementById("status").textContent =
-      `Model trained on ${matches.length} matches (${model.enemies.length} enemies). Paste a screenshot to begin.`;
+    document.getElementById("status").textContent = "Paste a screenshot to begin.";
   });

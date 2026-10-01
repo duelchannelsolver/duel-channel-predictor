@@ -1,11 +1,11 @@
-// Enemy detector, v4: geometry-anchored.
+// Enemy detector, v5: geometry-anchored (thin-line detection).
 //
 // The queue is always 3 slots per side (fixed positions, filled from the
 // centre outwards), sitting a fixed distance below a faint horizontal line
 // (~rgb(111,114,109)). All distances are fractions of image WIDTH. Verified
 // on 1918x1078, 1486x807 and 1918x1198 screenshots. Ultrawide (20:9)
 // screenshots are NOT supported: there the UI scales differently.
-//   1. find the faint line  -> gives the vertical anchor
+//   1. find the thin faint line (shape-based, not just colour) -> vertical anchor
 //   2. 6 fixed slot centres -> no sliding window
 //   3. skip empty slots (low pixel variance)
 //   4. classify with alpha-masked, multi-scale NCC against the sprites
@@ -29,6 +29,10 @@ const SLOT_X = {               // slot centre offset from image centre, / width
 const DEFAULTS = {
   lineColor: [111, 114, 109],
   lineTol: 60,            // sum of |dR|+|dG|+|dB| allowed
+  lineSpread: 20,         // max (maxChannel - minChannel): the line is neutral grey
+  lineGap: 2,             // px of non-matching pixels tolerated inside a run
+  lineMinCoverage: 0.5,   // a row is a line candidate if its longest run covers this much of the sampled width
+  lineMinContrast: 0.35,  // peak coverage minus coverage of the rows just outside the line
   centerBelowLine: 0.036,  // slot centre y = lineY + this * width
   diameter: 0.054,         // icon diameter / width
   fallbackCenterY: 0.90,   // * height, only if the line isn't found
@@ -300,33 +304,85 @@ async function readCount(src, cx, cy, D, side) {
 
 // -------------------------------------------------------------- geometry
 
-// Finds the row (in the bottom quarter, central band) whose pixels best
-// match the faint line colour. The line spans about +-0.215W from the
-// centre; we sample 0.07W..0.21W on each side, skipping the middle where
-// the ROUND badge / flame covers it.
-function findLineY(canvas, cfg) {
-  const W = canvas.width, H = canvas.height;
+// Finds the thin horizontal line. The line spans about +-0.215W from the
+// centre; we sample 0.07W..0.21W on each side, skipping the middle where the
+// ROUND badge / flame covers it.
+//
+// Matching the line's grey is NOT enough: sprite fur, stone tiles and snow
+// are the same grey. What distinguishes the line is its shape, so a row only
+// counts if:
+//   1. its pixels are neutral grey close to lineColor (colour + low spread)
+//   2. they form one long CONTINUOUS run (small gaps bridged) covering most
+//      of the sampled width on both sides of the centre, not scattered hits
+//   3. it is THIN: the group of adjacent qualifying rows is at most
+//      ~W/320 px tall (a patch of grey floor is tens of px tall)
+//   4. it has CONTRAST: the rows just above and below do not qualify
+// Candidates are ranked by (peak coverage - neighbour coverage).
+// Pure function over RGBA data so it can be tested outside the browser.
+function findLineInData(data, W, H, cfg) {
   const y0 = Math.floor(H * 0.75);
   const x0 = Math.round(W * 0.29), x1 = Math.round(W * 0.71);
-  const w = x1 - x0, h = H - y0;
-  const { data } = canvas.getContext("2d").getImageData(x0, y0, w, h);
+  const cx = W / 2, excl = W * 0.07;
+  const h = H - y0;
   const [tr, tg, tb] = cfg.lineColor;
 
-  let bestY = null, bestFrac = 0;
-  for (let y = 0; y < h; y++) {
-    let hit = 0, tot = 0;
-    for (let x = 0; x < w; x++) {
-      if (Math.abs(x0 + x - W / 2) < W * 0.07) continue;
-      tot++;
-      const i = (y * w + x) * 4;
-      const diff = Math.abs(data[i] - tr) + Math.abs(data[i + 1] - tg) + Math.abs(data[i + 2] - tb);
-      if (diff < cfg.lineTol) hit++;
+  // longest gap-tolerant run of matching pixels within [xa, xb) on row y
+  const rowRun = (y, xa, xb) => {
+    let best = 0, start = -1, last = -1;
+    for (let x = xa; x < xb; x++) {
+      const i = (y * W + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const diff = Math.abs(r - tr) + Math.abs(g - tg) + Math.abs(b - tb);
+      const spread = Math.max(r, g, b) - Math.min(r, g, b);
+      if (diff < cfg.lineTol && spread <= cfg.lineSpread) {
+        if (start < 0 || x - last > cfg.lineGap + 1) start = x;
+        last = x;
+        if (last - start + 1 > best) best = last - start + 1;
+      }
     }
-    const frac = hit / tot;
-    if (frac > bestFrac) { bestFrac = frac; bestY = y0 + y; }
+    return best;
+  };
+
+  const lA = x0, lB = Math.floor(cx - excl), rA = Math.ceil(cx + excl), rB = x1;
+  const tot = (lB - lA) + (rB - rA);
+  const cov = new Float32Array(h);
+  for (let j = 0; j < h; j++) {
+    const y = y0 + j;
+    cov[j] = (rowRun(y, lA, lB) + rowRun(y, rA, rB)) / tot;
   }
-  console.log(`line search: y=${bestY}, match fraction=${bestFrac.toFixed(2)}`);
-  return bestFrac > 0.3 ? bestY : null;
+
+  const maxThick = Math.max(3, Math.round(W / 320));
+  let best = null;
+  for (let j = 0; j < h; ) {
+    if (cov[j] < cfg.lineMinCoverage) { j++; continue; }
+    let k = j;
+    while (k < h && cov[k] >= cfg.lineMinCoverage) k++;
+    const thick = k - j;                       // rows j..k-1
+    if (thick <= maxThick) {
+      let peak = 0, peakJ = j;
+      for (let q = j; q < k; q++) if (cov[q] > peak) { peak = cov[q]; peakJ = q; }
+      let around = 0;
+      for (let d = 2; d <= maxThick + 1; d++) { // d=1 is the line's own anti-aliased edge
+        if (j - d >= 0) around = Math.max(around, cov[j - d]);
+        if (k - 1 + d < h) around = Math.max(around, cov[k - 1 + d]);
+      }
+      const score = peak - around;
+      if (score >= cfg.lineMinContrast && (!best || score > best.score))
+        best = { y: y0 + peakJ, score, peak, thick };
+    }
+    j = k;
+  }
+  return best;
+}
+
+function findLineY(canvas, cfg) {
+  const W = canvas.width, H = canvas.height;
+  const { data } = canvas.getContext("2d").getImageData(0, 0, W, H);
+  const hit = findLineInData(data, W, H, cfg);
+  console.log(hit
+    ? `line search: y=${hit.y}, coverage=${hit.peak.toFixed(2)}, thickness=${hit.thick}px, contrast=${hit.score.toFixed(2)}`
+    : "line search: no thin line found");
+  return hit ? hit.y : null;
 }
 
 function getPatch(canvas, cx, cy, D) {

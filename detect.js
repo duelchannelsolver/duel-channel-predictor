@@ -40,6 +40,8 @@ const DEFAULTS = {
                           // empty slots measure ~10-12, but low-contrast icons (e.g. the grey wolf
                           // on its dark orange backdrop) measure ~23, so keep this well below that.
                           // minScore is what really rejects empties (they score ~0 vs real icons 0.85+).
+  slashFrac: 0.85,        // empty slots show a thin light diagonal slash; >= this fraction of samples along it => empty
+  slashMin: 6,            // luminance by which the slash must beat both flanks
   minScore: 0.60,         // best NCC below this => unknown, skipped (real icons score 0.85+)
   debug: true,
 };
@@ -388,6 +390,38 @@ function findLineY(canvas, cfg) {
   return hit ? hit.y : null;
 }
 
+// Empty slots are translucent discs with a thin light "\\" slash through the
+// middle. Their std-dev overlaps with low-contrast real icons, and a pale
+// empty disc can correlate strongly with a pale sprite, so detect the slash
+// itself: sample along the main diagonal (searching a small perpendicular
+// offset) and check the line is brighter than BOTH flanks at ~every point.
+// Measured: empty slots 1.00 on every sample, real icons <= 0.62.
+function slashFraction(canvas, cx, cy, D, cfg) {
+  const n = Math.round(D);
+  const c = cropToCanvas(canvas, cx - D / 2, cy - D / 2, n, n);
+  const { data } = c.getContext("2d").getImageData(0, 0, n, n);
+  const L = (x, y) => {
+    x = Math.min(n - 1, Math.max(0, Math.round(x)));
+    y = Math.min(n - 1, Math.max(0, Math.round(y)));
+    const i = (y * n + x) * 4;
+    return 0.3 * data[i] + 0.59 * data[i + 1] + 0.11 * data[i + 2];
+  };
+  const off = 0.07 * n / Math.SQRT2;
+  let best = 0;
+  for (let o = -0.08 * n; o < 0.08 * n; o += 0.5) {
+    let ok = 0, tot = 0;
+    for (let k = 0; k <= 20; k++) {
+      const t = (0.3 + 0.02 * k) * n;
+      const mid = L(t, t + o);
+      const a = L(t + off, t + o - off), b = L(t - off, t + o + off);
+      if (mid - Math.max(a, b) > cfg.slashMin) ok++;
+      tot++;
+    }
+    best = Math.max(best, ok / tot);
+  }
+  return best;
+}
+
 function getPatch(canvas, cx, cy, D) {
   const c = cropToCanvas(canvas, cx - D / 2, cy - D / 2, D, D, SZ, SZ);
   const v = toVec(c);
@@ -472,7 +506,9 @@ async function detectEnemies(imageEl, config = {}, enemyNames) {
       const patch = getPatch(canvas, cx, cy, D);
       const log = { side, slot: i, cx: Math.round(cx), cy: Math.round(cy), std: +patch.std.toFixed(1) };
 
-      if (patch.std < cfg.emptyStd) {
+      const slash = slashFraction(canvas, cx, cy, D, cfg);
+      log.slash = +slash.toFixed(2);
+      if (patch.std < cfg.emptyStd || slash >= cfg.slashFrac) {
         log.result = "empty";
       } else {
         const m = classify(patch, templates);

@@ -347,8 +347,8 @@ async function loadSpriteNames(modelEnemies) {
 fetch("data/matches.json")
   .then((r) => r.json())
   .then(async (matches) => {
-    model = new EnemyStrengthModel(1.0, 0.75);
-    model.fit(matches, 1000);
+    model = new EnemyStrengthModel({ nTrees: 200, maxDepth: 12, minSamplesLeaf: 3, stormWeight: 0.75 });
+    model.fit(matches);
     spriteNames = await loadSpriteNames(model.enemies);
     // Populate the <datalist> so enemy-name text inputs autocomplete.
     const datalist = document.createElement("datalist");

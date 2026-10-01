@@ -36,7 +36,10 @@ const DEFAULTS = {
   centerBelowLine: 0.036,  // slot centre y = lineY + this * width
   diameter: 0.054,         // icon diameter / width
   fallbackCenterY: 0.90,   // * height, only if the line isn't found
-  emptyStd: 28,           // luminance std-dev below this => empty slot
+  emptyStd: 16,           // luminance std-dev below this => empty slot. Only a cheap pre-filter:
+                          // empty slots measure ~10-12, but low-contrast icons (e.g. the grey wolf
+                          // on its dark orange backdrop) measure ~23, so keep this well below that.
+                          // minScore is what really rejects empties (they score ~0 vs real icons 0.85+).
   minScore: 0.60,         // best NCC below this => unknown, skipped (real icons score 0.85+)
   debug: true,
 };

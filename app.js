@@ -50,7 +50,7 @@ function readTeam(containerId) {
 // Splits a team into enemies the model has history for and ones it has never
 // seen (recognised from sprites, but no matches recorded yet).
 function splitByHistory(team) {
-  const known = new Set(model.enemies);
+  const known = new Set(model ? model.enemies : []);
   const kept = {}, unseen = {};
   for (const [name, count] of Object.entries(team)) {
     (known.has(name) ? kept : unseen)[name] = count;
@@ -92,13 +92,26 @@ function updatePrediction() {
     if (ignoredText) setPredictionNote(`No match history yet for: ${ignoredText}`);
     return;
   }
+
+  // Check optional storm checkbox if present in UI
+  const stormInput = document.getElementById("storm") || document.getElementById("stormToggle");
+  const isStorm = stormInput ? !!stormInput.checked : false;
+
   let p;
+  let breakdown = null;
   try {
-    p = model.predictProba(L.kept, R.kept); // P(left team wins)
-  } catch {
+    if (typeof model.predictDetailed === "function") {
+      breakdown = model.predictDetailed(L.kept, R.kept, isStorm);
+      p = breakdown.p;
+    } else {
+      p = model.predictProba(L.kept, R.kept, isStorm);
+    }
+  } catch (err) {
+    console.error(err);
     out.textContent = "Couldn't compute a prediction -- check the enemy names.";
     return;
   }
+
   if (Math.abs(p - 0.5) < 0.0005) {
     out.textContent = "Winner: Toss-up, 50.0%";
   } else if (p > 0.5) {
@@ -106,8 +119,18 @@ function updatePrediction() {
   } else {
     out.textContent = `Winner: Right Team, ${((1 - p) * 100).toFixed(1)}%`;
   }
+
+  const notes = [];
+  if (breakdown) {
+    notes.push(
+      `Sub-models (Left): NN ${(breakdown.nn * 100).toFixed(1)}% | LR ${(breakdown.lr * 100).toFixed(1)}% | RF ${(breakdown.rf * 100).toFixed(1)}%`
+    );
+  }
   if (ignoredText) {
-    setPredictionNote(`Not counted (no match history yet): ${ignoredText}`);
+    notes.push(`Not counted (no match history yet): ${ignoredText}`);
+  }
+  if (notes.length) {
+    setPredictionNote(notes.join(" • "));
   }
 }
 
@@ -122,8 +145,7 @@ async function runDetection() {
     renderTeam("teamBList", right);
     document.getElementById("results").style.display = "block";
     updatePrediction(); // predict immediately
-    status.textContent =
-      "Detection is best-effort -- please check/edit names and counts.";
+    status.textContent = "Detection is best-effort -- please check/edit names and counts.";
   } catch (err) {
     console.error(err);
     if (run === detectionRun) status.textContent = "Detection failed -- see the console for details.";
@@ -170,9 +192,14 @@ document.querySelectorAll(".addRow").forEach((btn) => {
   document.getElementById(id).addEventListener("change", updatePrediction);
 });
 
+// Listen for storm toggle changes if present in markup
+["storm", "stormToggle"].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", updatePrediction);
+});
+
 // --------------------------------------------------------------- page setup
 
-// "Team A"/"Team B" -> "Left Team"/"Right Team" everywhere in the page text.
 function relabelTeams() {
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const nodes = [];
@@ -186,8 +213,6 @@ function relabelTeams() {
   document.title = document.title.replace(/\bTeam A\b/g, "Left Team").replace(/\bTeam B\b/g, "Right Team");
 }
 
-// Moves the band / icon-size / threshold controls behind an
-// "Advanced Settings" toggle button (collapsed by default).
 function setupAdvancedSettings() {
   const ids = ["lx", "ly", "lw", "lh", "rx", "ry", "rw", "rh", "iconSize", "threshold"];
   const inputs = ids.map((id) => document.getElementById(id)).filter(Boolean);
@@ -211,7 +236,6 @@ function setupAdvancedSettings() {
     toggle.setAttribute("aria-expanded", String(open));
   });
 
-  // Best case: the controls live in their own block -> move the whole block.
   let box = inputs[0].parentElement;
   while (box && !inputs.every((el) => box.contains(el))) box = box.parentElement;
   const isolated =
@@ -222,7 +246,6 @@ function setupAdvancedSettings() {
     box.parentNode.insertBefore(panel, box);
     panel.appendChild(box);
   } else {
-    // Otherwise move each control's own row (its <label> or parent element).
     const rows = [...new Set(inputs.map((el) => el.closest("label") || el.parentElement))];
     rows[0].parentNode.insertBefore(toggle, rows[0]);
     rows[0].parentNode.insertBefore(panel, rows[0]);
@@ -230,13 +253,11 @@ function setupAdvancedSettings() {
   }
 }
 
-// Auto-predict makes the manual button redundant.
 function hidePredictButton() {
   const btn = document.getElementById("predictBtn");
   if (btn) btn.style.display = "none";
 }
 
-// The page no longer advertises training-set size.
 function hideTrainingStats() {
   const el = document.getElementById("matchCount");
   if (!el) return;
@@ -250,14 +271,10 @@ function hideTrainingStats() {
 
 // ------------------------------------------------------------ copy to Excel
 
-// One spreadsheet row, tab-separated, matching the columns:
-//   Left Enemy 1 | # | Left Enemy 2 | # | Left Enemy 3 | #
-//   Right Enemy A | # | Right Enemy B | # | Right Enemy C | #
-// Empty slots become empty cells (so trailing tabs are intentional).
 const SLOTS_PER_SIDE = 3;
 
 function teamToCells(team) {
-  const entries = Object.entries(team).slice(0, SLOTS_PER_SIDE); // on-screen order
+  const entries = Object.entries(team).slice(0, SLOTS_PER_SIDE);
   const cells = [];
   for (let i = 0; i < SLOTS_PER_SIDE; i++) {
     cells.push(entries[i] ? entries[i][0] : "", entries[i] ? String(entries[i][1]) : "");
@@ -283,7 +300,6 @@ async function copyText(text) {
     await navigator.clipboard.writeText(text);
     return;
   }
-  // Fallback for non-HTTPS / older browsers.
   const ta = document.createElement("textarea");
   ta.value = text;
   ta.style.cssText = "position:fixed;opacity:0";
@@ -328,8 +344,6 @@ setupCopyButton();
 hidePredictButton();
 hideTrainingStats();
 
-// Reads sprites/manifest.json (see scripts/make-sprite-manifest.js). Falls
-// back to just the enemies from the match data if it isn't there.
 async function loadSpriteNames(modelEnemies) {
   try {
     const r = await fetch("sprites/manifest.json");
@@ -342,15 +356,51 @@ async function loadSpriteNames(modelEnemies) {
   }
 }
 
-// Train on page load -- fast enough (well under a second for ~100 rows) to
-// not need precomputed weights.
-fetch("data/matches.json")
-  .then((r) => r.json())
-  .then(async (matches) => {
-    model = new EnemyStrengthModel({ nTrees: 200, maxDepth: 12, minSamplesLeaf: 3, stormWeight: 0.75 });
-    model.fit(matches);
+async function fetchJsonWithFallback(primaryPath, fallbackPath) {
+  try {
+    const res = await fetch(primaryPath);
+    if (res.ok) return await res.json();
+  } catch (_) {}
+  const resFallback = await fetch(fallbackPath);
+  if (!resFallback.ok) {
+    throw new Error(`Failed to load ${primaryPath} or ${fallbackPath}`);
+  }
+  return await resFallback.json();
+}
+
+// --------------------------------------------------------------- initialisation
+
+async function init() {
+  const status = document.getElementById("status");
+  if (status) status.textContent = "Training stacked ensemble (NN + LR + RF)…";
+
+  try {
+    // 1. Fetch matches and enemy stats concurrently
+    const [matches, enemiesData] = await Promise.all([
+      fetchJsonWithFallback("data/matches.json", "matches.json"),
+      fetchJsonWithFallback("data/duel_channel_enemies.json", "duel_channel_enemies.json"),
+    ]);
+
+    // 2. Instantiate and fit DuelStackModel from stack.js
+    const StackClass =
+      window.DuelStackModel || window.EnemyStrengthModel || window.StackedDuelModel;
+    if (!StackClass) {
+      throw new Error("stack.js must be loaded before app.js (DuelStackModel not found).");
+    }
+
+    model = new StackClass({
+      rfTrees: 100,
+      nnEpochs: 80,
+      folds: 3, // fast OOF cross-validation for client-side startup
+    });
+
+    model.fit(matches, enemiesData);
+
+    // Expose model globally for console debugging
+    window.duelModel = model;
+
+    // 3. Prepare detection & autocomplete options
     spriteNames = await loadSpriteNames(model.enemies);
-    // Populate the <datalist> so enemy-name text inputs autocomplete.
     const datalist = document.createElement("datalist");
     datalist.id = "enemyNames";
     spriteNames.forEach((name) => {
@@ -359,8 +409,13 @@ fetch("data/matches.json")
       datalist.appendChild(opt);
     });
     document.body.appendChild(datalist);
-    // Start loading sprite templates + the OCR engine in the background so
-    // the first paste doesn't have to wait for them.
+
     warmUp(spriteNames);
-    document.getElementById("status").textContent = "Paste a screenshot to begin.";
-  });
+    if (status) status.textContent = "Paste a screenshot to begin.";
+  } catch (err) {
+    console.error("Initialization error:", err);
+    if (status) status.textContent = "Failed to load model data. Check console for details.";
+  }
+}
+
+init();

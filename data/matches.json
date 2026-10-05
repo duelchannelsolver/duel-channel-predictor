@@ -1402,17 +1402,6 @@
  },
  {
   "teamA": {
-   "Rainbowvore Blade": 5,
-   "Grenade Mercenary": 9
-  },
-  "teamB": {
-   "Criminal Funboat": 4
-  },
-  "winner": "B",
-  "storm": false
- },
- {
-  "teamA": {
    "Destabilized Emotions": 4,
    "Tiny Hermit Crab": 10,
    "Spear of Mutation": 5
@@ -1443,16 +1432,6 @@
    "Hound Pro": 44
   },
   "winner": "B",
-  "storm": false
- },
- {
-  "teamA": {
-   "Pacifist": 3
-  },
-  "teamB": {
-   "Jesselton Williams": 1
-  },
-  "winner": "A",
   "storm": false
  },
  {
@@ -2983,17 +2962,6 @@
  },
  {
   "teamA": {
-   "Prickly Rocks": 7,
-   "Lost Cadence": 9
-  },
-  "teamB": {
-   "Big Spider Sprayer": 5
-  },
-  "winner": "A",
-  "storm": true
- },
- {
-  "teamA": {
    "Big Snowball Thrower": 4,
    "Gopnik": 2,
    "Manifestation of Suffering": 3
@@ -3317,17 +3285,6 @@
   "teamB": {
    "Snotty Slug": 29,
    "Hound Pro": 49
-  },
-  "winner": "B",
-  "storm": false
- },
- {
-  "teamA": {
-   "Volatile Originium Slug": 25
-  },
-  "teamB": {
-   "Mortar Shell Thrower": 5,
-   "Plastic Wrap Knight": 15
   },
   "winner": "B",
   "storm": false
@@ -6457,20 +6414,6 @@
    "Smashing Stones": 1
   },
   "winner": "A",
-  "storm": false
- },
- {
-  "teamA": {
-   "Spear of Mutation": 5,
-   "Super Floor Scrubber": 2,
-   "Super Punch Robo": 2
-  },
-  "teamB": {
-   "Former Sailor": 7,
-   "Megamus": 5,
-   "Chained-up Pugilist": 12
-  },
-  "winner": "B",
   "storm": false
  },
  {

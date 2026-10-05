@@ -5,7 +5,16 @@ let detectionRun = 0;
 let isReady = false;
 
 function getDetectionConfig() {
-  return { debug: false };
+  const cfg = { debug: false };
+  const ids = ["lx", "ly", "lw", "lh", "rx", "ry", "rw", "rh", "iconSize", "threshold"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && el.value !== "") {
+      const val = Number(el.value);
+      if (!Number.isNaN(val)) cfg[id] = val;
+    }
+  });
+  return cfg;
 }
 
 function renderTeam(containerId, detections) {
@@ -87,14 +96,8 @@ function updatePrediction() {
   }
 
   let p;
-  let breakdown = null;
   try {
-    if (typeof model.predictDetailed === "function") {
-      breakdown = model.predictDetailed(L.kept, R.kept);
-      p = breakdown.p;
-    } else {
-      p = model.predictProba(L.kept, R.kept);
-    }
+    p = model.predictProba(L.kept, R.kept);
   } catch (err) {
     console.error(err);
     out.textContent = "Couldn't compute a prediction -- check the enemy names.";
@@ -109,14 +112,9 @@ function updatePrediction() {
     out.textContent = `Winner: Right Team, ${((1 - p) * 100).toFixed(1)}%`;
   }
 
-  const notes = [];
-  if (breakdown) {
-    notes.push(
-      `Sub-models: NN ${(breakdown.nn * 100).toFixed(1)}% | LR ${(breakdown.lr * 100).toFixed(1)}% | RF ${(breakdown.rf * 100).toFixed(1)}%`
-    );
+  if (ignoredText) {
+    setPredictionNote(`Not counted (no match history yet): ${ignoredText}`);
   }
-  if (ignoredText) notes.push(`Not counted (no match history): ${ignoredText}`);
-  if (notes.length) setPredictionNote(notes.join(" • "));
 }
 
 async function runDetection() {
@@ -138,7 +136,7 @@ async function runDetection() {
     status.textContent = "Detection is best-effort -- please check/edit names and counts.";
   } catch (err) {
     console.error(err);
-    if (run === detectionRun) status.textContent = "Detection failed -- see console.";
+    if (run === detectionRun) status.textContent = "Detection failed -- see the console for details.";
   }
 }
 
@@ -181,7 +179,154 @@ document.querySelectorAll(".addRow").forEach((btn) => {
   document.getElementById(id).addEventListener("change", updatePrediction);
 });
 
-// --------------------------------------------------------------- Setup & Load
+// --------------------------------------------------------------- Page Setup & Controls
+
+function relabelTeams() {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    const tag = n.parentElement && n.parentElement.tagName;
+    if (tag === "SCRIPT" || tag === "STYLE" || tag === "TEXTAREA") continue;
+    const t = n.nodeValue.replace(/\bTeam A\b/g, "Left Team").replace(/\bTeam B\b/g, "Right Team");
+    if (t !== n.nodeValue) n.nodeValue = t;
+  }
+  document.title = document.title.replace(/\bTeam A\b/g, "Left Team").replace(/\bTeam B\b/g, "Right Team");
+}
+
+function setupAdvancedSettings() {
+  const ids = ["lx", "ly", "lw", "lh", "rx", "ry", "rw", "rh", "iconSize", "threshold"];
+  const inputs = ids.map((id) => document.getElementById(id)).filter(Boolean);
+  if (!inputs.length) return;
+
+  const mustStayVisible = ["fileInput", "redetect", "results", "status", "predictBtn"]
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.id = "advancedToggle";
+  toggle.textContent = "Advanced Settings";
+  toggle.setAttribute("aria-expanded", "false");
+  const panel = document.createElement("div");
+  panel.id = "advancedPanel";
+  panel.style.display = "none";
+  toggle.addEventListener("click", () => {
+    const open = panel.style.display === "none";
+    panel.style.display = open ? "" : "none";
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+
+  let box = inputs[0].parentElement;
+  while (box && !inputs.every((el) => box.contains(el))) box = box.parentElement;
+  const isolated =
+    box && box !== document.body && !mustStayVisible.some((el) => box.contains(el));
+
+  if (isolated) {
+    box.parentNode.insertBefore(toggle, box);
+    box.parentNode.insertBefore(panel, box);
+    panel.appendChild(box);
+  } else {
+    const rows = [...new Set(inputs.map((el) => el.closest("label") || el.parentElement))];
+    rows[0].parentNode.insertBefore(toggle, rows[0]);
+    rows[0].parentNode.insertBefore(panel, rows[0]);
+    rows.forEach((r) => panel.appendChild(r));
+  }
+}
+
+function hidePredictButton() {
+  const btn = document.getElementById("predictBtn");
+  if (btn) btn.style.display = "none";
+}
+
+function hideTrainingStats() {
+  const el = document.getElementById("matchCount");
+  if (!el) return;
+  const host = el.parentElement;
+  if (host && host !== document.body && host.textContent.length < 150) {
+    host.style.display = "none";
+  } else {
+    el.style.display = "none";
+  }
+}
+
+// ------------------------------------------------------------ Excel Export
+
+const SLOTS_PER_SIDE = 3;
+
+function teamToCells(team) {
+  const entries = Object.entries(team).slice(0, SLOTS_PER_SIDE);
+  const cells = [];
+  for (let i = 0; i < SLOTS_PER_SIDE; i++) {
+    cells.push(entries[i] ? entries[i][0] : "", entries[i] ? String(entries[i][1]) : "");
+  }
+  return cells;
+}
+
+function buildExcelRow() {
+  const left = readTeam("teamAList");
+  const right = readTeam("teamBList");
+  const overflow =
+    Math.max(0, Object.keys(left).length - SLOTS_PER_SIDE) +
+    Math.max(0, Object.keys(right).length - SLOTS_PER_SIDE);
+  return {
+    text: [...teamToCells(left), ...teamToCells(right)].join("\t"),
+    empty: !Object.keys(left).length && !Object.keys(right).length,
+    overflow,
+  };
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  if (!ok) throw new Error("copy failed");
+}
+
+function setupCopyButton() {
+  const anchor = document.getElementById("predictionOutput");
+  if (!anchor) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "copyExcelBtn";
+  btn.textContent = "Copy for Excel";
+  btn.style.marginTop = "8px";
+  let timer = null;
+  const flash = (msg) => {
+    btn.textContent = msg;
+    clearTimeout(timer);
+    timer = setTimeout(() => (btn.textContent = "Copy for Excel"), 1800);
+  };
+  btn.addEventListener("click", async () => {
+    const { text, empty, overflow } = buildExcelRow();
+    if (empty) return flash("Nothing to copy");
+    try {
+      await copyText(text);
+      flash(overflow ? `Copied (${overflow} extra enemy type(s) left out)` : "Copied!");
+    } catch (err) {
+      console.error(err);
+      flash("Copy failed");
+    }
+  });
+  anchor.insertAdjacentElement("afterend", btn);
+}
+
+// Initial setup passes
+relabelTeams();
+setupAdvancedSettings();
+setupCopyButton();
+hidePredictButton();
+hideTrainingStats();
+
+// --------------------------------------------------------------- Data Load & Model Init
 
 async function loadSpriteNames(modelEnemies = []) {
   try {
@@ -206,7 +351,7 @@ async function fetchJson(paths) {
 
 async function init() {
   const status = document.getElementById("status");
-  status.textContent = "Initializing stack model & sprites…";
+  if (status) status.textContent = "Initializing stack model & sprites…";
 
   try {
     const [matches, enemiesData] = await Promise.all([
@@ -236,10 +381,10 @@ async function init() {
 
     if (typeof warmUp === "function") warmUp(spriteNames);
     isReady = true;
-    status.textContent = "Paste a screenshot to begin.";
+    if (status) status.textContent = "Paste a screenshot to begin.";
   } catch (err) {
     console.error("Initialization error:", err);
-    status.textContent = "Failed to load model data. Check console.";
+    if (status) status.textContent = "Failed to load model data. Check console.";
   }
 }
 

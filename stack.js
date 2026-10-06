@@ -88,7 +88,10 @@
       ai: num(e['Attack Interval'], atk > 0 ? 5 : 1),
       range,
       physShare,
-      flags: FLAG_NAMES.map((f) => (ABILITY_FLAGS[f](text) ? 1 : 0)),
+      flags: FLAG_NAMES.map((f) => {
+  const v = ABILITY_FLAGS[f](text);
+  return typeof v === 'number' ? v : (v ? 1 : 0);
+}),
     };
   }
 

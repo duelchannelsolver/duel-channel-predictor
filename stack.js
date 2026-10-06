@@ -48,8 +48,15 @@
   // ---------------------------------------------------------------------------
   // Domain Stats & Feature Extraction
   // ---------------------------------------------------------------------------
-  const ABILITY_FLAGS = {
-    stun:      (t) => /\bstuns?\b/.test(t.replace(/immune to stun( and freeze)?/g, '')),
+    const ABILITY_FLAGS = {
+    stun: (t) => {
+  const clean = t
+    .replace(/immune to stun( and freeze)?/g, '')
+    .replace(/immune to cold/g, '');
+  if (/\bstuns?\b/.test(clean)) return 1;               // full stun
+  if (/inflict\w*[^.]*\bcold\b/.test(clean)) return 0.5; // cold: 2 stacks to freeze
+  return 0;
+},
     revive:    (t) => /revive/.test(t),
     barrier:   (t) => /barrier|shield/.test(t),
     aoe:       (t) => /splash|adjacent|radius|up to (two|three|four|\d+) targets|jump between|entire column|every row/.test(t),
@@ -60,6 +67,8 @@
     tanky:     (t) => /takes -\d+%|dodge|immune|status resistance/.test(t),
     selfBuff:  (t) => /gains|enraged|overdrive|\+\d+% atk/.test(t),
     burst:     (t) => /explodes|burst/.test(t),
+	suicide: (t) => /loses (300|50)\b/.test(t),
+	token: (t) => /\bspawns\b(?!\s+by\b)/.test(t),
   };
   const FLAG_NAMES = Object.keys(ABILITY_FLAGS);
 
@@ -213,9 +222,16 @@
   // ---------------------------------------------------------------------------
   class DuelStackModel {
     constructor(options = {}) {
-      this.rfTrees = options.rfTrees ?? 100;
-      this.rfDepth = options.rfDepth ?? 12;
-      this.rfMinLeaf = options.rfMinLeaf ?? 3;
+      // XGBoost (gradient-boosted trees) settings
+      this.xgbTrees = options.xgbTrees ?? 100;
+      this.xgbDepth = options.xgbDepth ?? 3;
+      this.xgbLr = options.xgbLr ?? 0.08;
+      this.xgbLambda = options.xgbLambda ?? 1.5;
+      this.xgbGamma = options.xgbGamma ?? 0.1;
+      this.xgbMinChildWeight = options.xgbMinChildWeight ?? 1.0;
+      this.xgbSubsample = options.xgbSubsample ?? 0.85;
+      this.xgbColsample = options.xgbColsample ?? 0.85;
+      this.xgbStormWeight = options.xgbStormWeight ?? 0.75;
       this.nnEpochs = options.nnEpochs ?? 80;
       this.nnHidden = options.nnHidden ?? [24, 12];
       this.folds = options.folds ?? 3;
@@ -279,78 +295,117 @@
       };
     }
 
-    _trainRF(matches, enemies, rng) {
-      const n = matches.length, d = enemies.length;
-      const X = new Float64Array(2 * n * d), y = new Uint8Array(2 * n), sw = new Float64Array(2 * n);
+    _trainXGB(matches, enemies, rng) {
+      const n = matches.length, d = enemies.length, nTotal = 2 * n;
+      const lambda = this.xgbLambda, gamma = this.xgbGamma, minChild = this.xgbMinChildWeight;
+      const lr = this.xgbLr, maxDepth = this.xgbDepth;
+      const cnt = (team, e) => Number((team && team[e]) || 0) || 0;
+      const sig = (z) => (z > 20 ? 1 : z < -20 ? 0 : 1 / (1 + Math.exp(-z)));
+
+      // Antisymmetric augmentation: every match appears as (A vs B) and (B vs A)
+      const X = new Float64Array(nTotal * d), y = new Float64Array(nTotal), sw = new Float64Array(nTotal);
       for (let s = 0; s < n; s++) {
         const m = matches[s];
         const lbl = m.winner === 'A' ? 1 : 0;
-        const w = m.storm === true ? 0.75 : 1.0;
+        const w = m.storm === true ? this.xgbStormWeight : 1.0;
         y[s] = lbl; y[s + n] = 1 - lbl;
-        sw[s] = sw[s + n] = w;
+        sw[s] = w; sw[s + n] = w;
         for (let j = 0; j < d; j++) {
-          const diff = ((m.teamA && m.teamA[enemies[j]]) || 0) - ((m.teamB && m.teamB[enemies[j]]) || 0);
-          X[s * d + j] = diff;
-          X[(s + n) * d + j] = -diff;
+          const f = Math.sqrt(cnt(m.teamA, enemies[j])) - Math.sqrt(cnt(m.teamB, enemies[j]));
+          X[s * d + j] = f;
+          X[(s + n) * d + j] = -f;
         }
       }
 
-      const mtry = Math.max(1, Math.floor(Math.sqrt(d)));
-      const buildTree = (rows, depth) => {
-        let W = 0, W1 = 0;
-        for (const r of rows) { W += sw[r]; if (y[r] === 1) W1 += sw[r]; }
-        if (depth >= this.rfDepth || rows.length < 2 * this.rfMinLeaf || W1 === 0 || W1 === W) {
-          return { p: W > 0 ? W1 / W : 0.5 };
-        }
-        const parentImp = 2 * (W1 / W) * (1 - W1 / W);
+      const mtry = Math.max(1, Math.floor(d * this.xgbColsample));
+      const sampleSize = Math.max(1, Math.floor(n * this.xgbSubsample));
+      const score = (G, H) => (G * G) / (H + lambda);
+
+      const buildTree = (rows, g, h, depth) => {
+        let G = 0, H = 0;
+        for (let i = 0; i < rows.length; i++) { G += g[rows[i]]; H += h[rows[i]]; }
+        const leaf = { leaf: -(G / (H + lambda)) * lr };
+        if (depth >= maxDepth || rows.length <= 1 || H < minChild) return leaf;
+
+        // Column subsampling (partial Fisher-Yates)
         const feats = new Int32Array(d);
         for (let j = 0; j < d; j++) feats[j] = j;
-        for (let j = 0; j < Math.min(mtry, d); j++) {
-          const k = j + Math.floor(rng() * (d - j));
-          const tmp = feats[j]; feats[j] = feats[k]; feats[k] = tmp;
+        const k = Math.min(mtry, d);
+        for (let j = 0; j < k; j++) {
+          const t = j + Math.floor(rng() * (d - j));
+          const tmp = feats[j]; feats[j] = feats[t]; feats[t] = tmp;
         }
 
-        let bestG = 1e-12, bestF = -1, bestT = 0;
-        for (let fi = 0; fi < Math.min(mtry, d); fi++) {
+        let bestGain = 0, bestF = -1, bestT = 0;
+        for (let fi = 0; fi < k; fi++) {
           const f = feats[fi];
           const sorted = rows.slice().sort((a, b) => X[a * d + f] - X[b * d + f]);
-          let WL = 0, WL1 = 0;
+          let GL = 0, HL = 0;
           for (let i = 0; i < sorted.length - 1; i++) {
-            const r = sorted[i]; WL += sw[r]; if (y[r] === 1) WL1 += sw[r];
+            const r = sorted[i]; GL += g[r]; HL += h[r];
             const v = X[r * d + f], vNext = X[sorted[i + 1] * d + f];
-            if (v === vNext || (i + 1) < this.rfMinLeaf || (sorted.length - i - 1) < this.rfMinLeaf) continue;
-            const WR = W - WL, WR1 = W1 - WL1;
-            const g = W * parentImp - WL * (2 * (WL1 / WL) * (1 - WL1 / WL)) - WR * (2 * (WR1 / WR) * (1 - WR1 / WR));
-            if (g > bestG) { bestG = g; bestF = f; bestT = (v + vNext) / 2; }
+            if (v === vNext) continue;
+            const GR = G - GL, HR = H - HL;
+            if (HL < minChild || HR < minChild) continue;
+            const gain = 0.5 * (score(GL, HL) + score(GR, HR) - score(G, H)) - gamma;
+            if (gain > bestGain) { bestGain = gain; bestF = f; bestT = (v + vNext) / 2; }
           }
         }
-        if (bestF < 0) return { p: W > 0 ? W1 / W : 0.5 };
+        if (bestF < 0 || bestGain <= 0) return leaf;
+
         const left = [], right = [];
-        for (const r of rows) (X[r * d + bestF] <= bestT ? left : right).push(r);
-        return { f: bestF, t: bestT, l: buildTree(left, depth + 1), r: buildTree(right, depth + 1) };
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          (X[r * d + bestF] <= bestT ? left : right).push(r);
+        }
+        return {
+          f: bestF, t: bestT,
+          l: buildTree(left, g, h, depth + 1),
+          r: buildTree(right, g, h, depth + 1),
+        };
       };
 
+      const rowScore = (node, off) => {
+        while (node.leaf === undefined) node = X[off + node.f] <= node.t ? node.l : node.r;
+        return node.leaf;
+      };
+      const vecScore = (node, x) => {
+        while (node.leaf === undefined) node = x[node.f] <= node.t ? node.l : node.r;
+        return node.leaf;
+      };
+
+      const raw = new Float64Array(nTotal);
+      const g = new Float64Array(nTotal), h = new Float64Array(nTotal);
       const trees = [];
-      for (let t = 0; t < this.rfTrees; t++) {
+      for (let t = 0; t < this.xgbTrees; t++) {
+        for (let i = 0; i < nTotal; i++) {
+          const p = sig(raw[i]);
+          g[i] = (p - y[i]) * sw[i];
+          h[i] = Math.max(p * (1 - p) * sw[i], 1e-16);
+        }
+        // Row subsample (with replacement); both orientations of a match stay together
         const rows = [];
-        for (let i = 0; i < n; i++) { const k = Math.floor(rng() * n); rows.push(k, k + n); }
-        trees.push(buildTree(rows, 0));
+        for (let k = 0; k < sampleSize; k++) {
+          const idx = Math.floor(rng() * n);
+          rows.push(idx, idx + n);
+        }
+        const tree = buildTree(rows, g, h, 0);
+        trees.push(tree);
+        for (let i = 0; i < nTotal; i++) raw[i] += rowScore(tree, i * d);
       }
 
-      const predVec = (tree, x) => {
-        let cur = tree;
-        while (cur.p === undefined) cur = x[cur.f] <= cur.t ? cur.l : cur.r;
-        return cur.p;
+      const margin = (x) => {
+        let m = 0;
+        for (let i = 0; i < trees.length; i++) m += vecScore(trees[i], x);
+        return m;
       };
 
       return {
         predict: (tA, tB) => {
           const x = new Float64Array(d);
-          for (let j = 0; j < d; j++) x[j] = (tA[enemies[j]] || 0) - (tB[enemies[j]] || 0);
+          for (let j = 0; j < d; j++) x[j] = Math.sqrt(cnt(tA, enemies[j])) - Math.sqrt(cnt(tB, enemies[j]));
           const neg = x.map((v) => -v);
-          let s1 = 0, s2 = 0;
-          for (const tr of trees) { s1 += predVec(tr, x); s2 += predVec(tr, neg); }
-          return 0.5 * (s1 / trees.length + (1 - s2 / trees.length));
+          return 0.5 * (sig(margin(x)) + (1 - sig(margin(neg))));
         },
       };
     }
@@ -450,14 +505,14 @@
         const tr = matches.filter((_, i) => i % K !== f);
         const te = matches.filter((_, i) => i % K === f);
         const foldLR = this._trainLR(tr, this.enemies);
-        const foldRF = this._trainRF(tr, this.enemies, mulberry32(this.seed + f * 17 + 1));
+        const foldXGB = this._trainXGB(tr, this.enemies, mulberry32(this.seed + f * 17 + 1));
         const foldNN = this._trainNN(tr, mulberry32(this.seed + f * 31 + 1));
 
         for (const m of te) {
           const pNN = foldNN.predict(m.teamA, m.teamB, m.storm);
           const pLR = foldLR.predict(m.teamA, m.teamB);
-          const pRF = foldRF.predict(m.teamA, m.teamB);
-          oofLogits.push([logit(pNN), logit(pLR), logit(pRF)]);
+          const pXGB = foldXGB.predict(m.teamA, m.teamB);
+          oofLogits.push([logit(pNN), logit(pLR), logit(pXGB)]);
           oofTargets.push(m.winner === 'A' ? 1 : 0);
         }
       }
@@ -485,21 +540,22 @@
 
       // Final base models trained on full dataset
       this.modelLR = this._trainLR(matches, this.enemies);
-      this.modelRF = this._trainRF(matches, this.enemies, mulberry32(this.seed + 999));
+      this.modelXGB = this._trainXGB(matches, this.enemies, mulberry32(this.seed + 999));
       this.modelNN = this._trainNN(matches, mulberry32(this.seed + 888));
     }
 
     predictDetailed(teamA, teamB, storm = false) {
       const pNN = this.modelNN.predict(teamA, teamB, storm);
       const pLR = this.modelLR.predict(teamA, teamB);
-      const pRF = this.modelRF.predict(teamA, teamB);
+      const pXGB = this.modelXGB.predict(teamA, teamB);
 
-      const z = this.weights[0] * logit(pNN) + this.weights[1] * logit(pLR) + this.weights[2] * logit(pRF);
+      const z = this.weights[0] * logit(pNN) + this.weights[1] * logit(pLR) + this.weights[2] * logit(pXGB);
       return {
         p: sigmoid(z),
         nn: pNN,
         lr: pLR,
-        rf: pRF,
+        xgb: pXGB,
+        rf: pXGB, // legacy alias so existing UI code reading `.rf` keeps working
         weights: this.weights,
       };
     }

@@ -7380,5 +7380,1771 @@
   },
   "winner": "A",
   "storm": false
+ },
+ {
+  "teamA": {
+   "Age of Utensils": 4
+  },
+  "teamB": {
+   "Explosive Seed": 21
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Big Axe": 3
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 13
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Big Axe": 4
+  },
+  "teamB": {
+   "Chocolate Custard Slug": 29
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Sober Ink Spirit": 32,
+   "Javelin Sea Terror": 7
+  },
+  "teamB": {
+   "Chained-up Pugilist": 8,
+   "Pacifist": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Flame and Steel": 1
+  },
+  "teamB": {
+   "Starry Magician": 10,
+   "Former Sailor": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Relaxed Burdenbeast": 3,
+   "Flamelet and Softsteel": 7
+  },
+  "teamB": {
+   "Javelin Sea Terror": 10,
+   "Lost Cadence": 6
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Megamus": 7,
+   "Mutant Carnivorous Plant": 3
+  },
+  "teamB": {
+   "Traffic Tower Production Model": 2,
+   "Portal": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Resort Off-road Vehicle": 6,
+   "Sensitive Hoarder": 18
+  },
+  "teamB": {
+   "Saint Carmen": 4,
+   "Rainbowvore Blade": 6
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rainbowvore Blade": 7,
+   "Prickly Rocks": 7
+  },
+  "teamB": {
+   "Sober Ink Spirit": 67,
+   "Criminal Funboat": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Insufficient Sleep": 7,
+   "Javelin Sea Terror": 8,
+   "Big Snowball Thrower": 5
+  },
+  "teamB": {
+   "Explosive Seed": 26,
+   "Self-Destruct Ice Slug": 17,
+   "Starry Magician": 11
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Saint Carmen": 3,
+   "Still Signore dei Lupi": 1,
+   "Coldhands Caster": 1
+  },
+  "teamB": {
+   "Chivalrous Trio": 1,
+   "Big Snowball Thrower": 4,
+   "Coat-hanger Marksman": 14
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coat-hanger Marksman": 13,
+   "Spear of Mutation": 4,
+   "Rot Eating Beast": 7
+  },
+  "teamB": {
+   "Mutant Carnivorous Plant": 3,
+   "Still Signore dei Lupi": 1,
+   "Javelin Sea Terror": 7
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Former Sailor": 4
+  },
+  "teamB": {
+   "Resort Off-road Vehicle": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Starry Magician": 11
+  },
+  "teamB": {
+   "Resort Off-road Vehicle": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Super Floor Scrubber": 2
+  },
+  "teamB": {
+   "Self-Destruct Ice Slug": 19
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coat-hanger Marksman": 11,
+   "Traffic Tower Production Model": 2
+  },
+  "teamB": {
+   "Explosive Seed": 23,
+   "Super Floor Scrubber": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chivalrous Trio": 1
+  },
+  "teamB": {
+   "Sober Ink Spirit": 58,
+   "Mech Crocodile": 12
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Mutant Carnivorous Plant": 3,
+   "Coat-hanger Marksman": 12
+  },
+  "teamB": {
+   "Miasma Swarm": 6,
+   "Prickly Rocks": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Lamplighter Knight": 6,
+   "Self-Destruct Ice Slug": 20
+  },
+  "teamB": {
+   "Pompeii": 2,
+   "Sensitive Hoarder": 17
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rubber Bullet Sniper": 24,
+   "Resort Off-road Vehicle": 7
+  },
+  "teamB": {
+   "Go! Carcass!": 16,
+   "Portal": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Originium Limbs": 10,
+   "Traffic Tower Production Model": 3
+  },
+  "teamB": {
+   "Miasma Swarm": 6,
+   "Manifestation of Suffering": 3,
+   "Big Snowball Thrower": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Age of Utensils": 7,
+   "Sensitive Hoarder": 14,
+   "Megamus": 7
+  },
+  "teamB": {
+   "Miasma Swarm": 7,
+   "Lost Cadence": 6,
+   "Relaxed Burdenbeast": 2
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Traffic Tower Production Model": 3,
+   "Smashing Stones": 1,
+   "Coldhands Caster": 1
+  },
+  "teamB": {
+   "Chivalrous Trio": 1,
+   "Crabby Grandpa": 2,
+   "Manifestation of Suffering": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Criminal Funboat": 2
+  },
+  "teamB": {
+   "Traffic Tower Production Model": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Big Snowball Thrower": 4
+  },
+  "teamB": {
+   "Mutant Carnivorous Plant": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chocolate Custard Slug": 20,
+   "Explosive Seed": 17
+  },
+  "teamB": {
+   "Rubber Bullet Sniper": 13,
+   "Lamplighter Knight": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Miasma Swarm": 4,
+   "Lost Cadence": 5
+  },
+  "teamB": {
+   "Prickly Rocks": 4,
+   "Coat-hanger Marksman": 10
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Knights Together Strong": 1
+  },
+  "teamB": {
+   "Miasma Swarm": 6,
+   "Sensitive Hoarder": 13
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Explosive Seed": 30,
+   "Self-Destruct Ice Slug": 16
+  },
+  "teamB": {
+   "Big Snowball Thrower": 4,
+   "Common Mus": 43
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coat-hanger Marksman": 16,
+   "Rubber Bullet Sniper": 21
+  },
+  "teamB": {
+   "Mortar Shell Thrower": 5,
+   "Maniacal Forager": 8
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Portal": 4,
+   "Miasma Swarm": 7
+  },
+  "teamB": {
+   "Resort Off-road Vehicle": 7,
+   "Go! Carcass!": 20
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Mech Crocodile": 8,
+   "Insufficient Sleep": 5,
+   "Self-Destruct Ice Slug": 15
+  },
+  "teamB": {
+   "Resort Off-road Vehicle": 6,
+   "Tornado Ninja": 3,
+   "Miasma Swarm": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Super Blast Robo": 4,
+   "Tornado Ninja": 4,
+   "Originium Limbs": 9
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 17,
+   "Jesselton Williams": 2,
+   "Spear of Mutation": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Explosive Seed": 20
+  },
+  "teamB": {
+   "Spear of Mutation": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rubber Bullet Sniper": 21
+  },
+  "teamB": {
+   "Starving Vanguard": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Starry Magician": 8,
+   "Pompeii": 2
+  },
+  "teamB": {
+   "Go! Carcass!": 18
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Saint Carmen": 3,
+   "Snotty Slug": 20
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 8,
+   "Self-Destruct Ice Slug": 14
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Saint Carmen": 7
+  },
+  "teamB": {
+   "Manifestation of Suffering": 6,
+   "Amplifying Caster": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Smashing Stones": 2,
+   "Coat-hanger Marksman": 14
+  },
+  "teamB": {
+   "Rot Eating Beast": 7,
+   "Firewood Knight": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Prickly Rocks": 6,
+   "Manifestation of Suffering": 3
+  },
+  "teamB": {
+   "Saint Carmen": 4,
+   "Relaxed Burdenbeast": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rainbowvore Blade": 4
+  },
+  "teamB": {
+   "Grenade Mercenary": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Tornado Ninja": 3
+  },
+  "teamB": {
+   "Javelin Sea Terror": 8
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Manifestation of Suffering": 2,
+   "Lost Cadence": 4
+  },
+  "teamB": {
+   "Lamplighter Knight": 7
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Criminal Funboat": 3,
+   "Mortar Shell Thrower": 3
+  },
+  "teamB": {
+   "Sober Ink Spirit": 29,
+   "Traffic Tower Production Model": 1
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Knights Together Strong": 1
+  },
+  "teamB": {
+   "Self-Destruct Ice Slug": 15,
+   "Go! Carcass!": 11
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Pacifist": 4,
+   "Super Punch Robo": 3
+  },
+  "teamB": {
+   "Sober Ink Spirit": 42,
+   "Mortar Shell Thrower": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Pompeii": 2,
+   "Self-Destruct Ice Slug": 17
+  },
+  "teamB": {
+   "Smashing Stones": 1,
+   "Big Snowball Thrower": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Portal": 4,
+   "Megamus": 8
+  },
+  "teamB": {
+   "Flamelet and Softsteel": 10,
+   "Amplifying Caster": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Destabilized Emotions": 4,
+   "Jesselton Williams": 2,
+   "Snotty Slug": 23
+  },
+  "teamB": {
+   "Starry Magician": 13,
+   "Big Snowball Thrower": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coat-hanger Marksman": 11
+  },
+  "teamB": {
+   "Pacifist": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Spear of Mutation": 5
+  },
+  "teamB": {
+   "Jesselton Williams": 1
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rubber Bullet Sniper": 24
+  },
+  "teamB": {
+   "Relaxed Burdenbeast": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Lost Cadence": 5,
+   "Pompeii": 1
+  },
+  "teamB": {
+   "Javelin Sea Terror": 6,
+   "Maniacal Forager": 7
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Samivilinn": 1
+  },
+  "teamB": {
+   "Common Mus": 53,
+   "Coat-hanger Marksman": 17
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Traffic Tower Production Model": 2,
+   "Rubber Bullet Sniper": 15
+  },
+  "teamB": {
+   "Saint Carmen": 3,
+   "Relaxed Burdenbeast": 2
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Smashing Stones": 2,
+   "Sensitive Hoarder": 16
+  },
+  "teamB": {
+   "Big Snowball Thrower": 4,
+   "Insufficient Sleep": 7
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Super Floor Scrubber": 3,
+   "Criminal Funboat": 3
+  },
+  "teamB": {
+   "Chocolate Custard Slug": 26,
+   "Guardian of Quick-Wins": 7
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Miasma Swarm": 10,
+   "Lamplighter Knight": 6
+  },
+  "teamB": {
+   "Snotty Slug": 23,
+   "Starry Magician": 9,
+   "Javelin Sea Terror": 7
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Sensitive Hoarder": 13
+  },
+  "teamB": {
+   "Big Snowball Thrower": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Super Blast Robo": 3
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 13
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Miasma Swarm": 7
+  },
+  "teamB": {
+   "Smashing Stones": 1,
+   "Spear of Mutation": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Pompeii": 2,
+   "Starving Vanguard": 2
+  },
+  "teamB": {
+   "Go! Carcass!": 12,
+   "Snotty Slug": 19
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chivalrous Trio": 1
+  },
+  "teamB": {
+   "Tornado Ninja": 5,
+   "Amplifying Caster": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Prickly Rocks": 6,
+   "Mortar Shell Thrower": 4
+  },
+  "teamB": {
+   "Big Snowball Thrower": 5,
+   "Grenade Mercenary": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Smashing Stones": 2,
+   "Resort Off-road Vehicle": 6
+  },
+  "teamB": {
+   "Coldhands Caster": 14,
+   "Criminal Funboat": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Big Snowball Thrower": 5,
+   "Rainbowvore Blade": 6
+  },
+  "teamB": {
+   "Tornado Ninja": 5,
+   "Relaxed Burdenbeast": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rainbowvore Blade": 7,
+   "Snotty Slug": 34
+  },
+  "teamB": {
+   "Firewood Knight": 3,
+   "Starry Magician": 11,
+   "Self-Destruct Ice Slug": 24
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Explosive Seed": 27,
+   "Traffic Tower Production Model": 2,
+   "Super Blast Robo": 4
+  },
+  "teamB": {
+   "Big Snowball Thrower": 4,
+   "Lamplighter Knight": 6,
+   "Pompeii": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Sober Ink Spirit": 43,
+   "Knights Together Strong": 1,
+   "Amplifying Caster": 4
+  },
+  "teamB": {
+   "Mortar Shell Thrower": 3,
+   "Pompeii": 2,
+   "Coldhands Caster": 13
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Pacifist": 4
+  },
+  "teamB": {
+   "Guardian of Quick-Wins": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Go! Carcass!": 14
+  },
+  "teamB": {
+   "Firewood Knight": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Pompeii": 2,
+   "Super Punch Robo": 1
+  },
+  "teamB": {
+   "Super Blast Robo": 4
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Relaxed Burdenbeast": 2,
+   "Criminal Funboat": 2
+  },
+  "teamB": {
+   "Spear of Mutation": 3,
+   "Traffic Tower Production Model": 1
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Sui-Xiang": 1
+  },
+  "teamB": {
+   "Spear of Mutation": 7,
+   "Jesselton Williams": 1
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Firewood Knight": 5,
+   "Insufficient Sleep": 7
+  },
+  "teamB": {
+   "Amplifying Caster": 4,
+   "Super Floor Scrubber": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Originium Limbs": 8,
+   "Big Snowball Thrower": 5
+  },
+  "teamB": {
+   "Former Sailor": 7,
+   "Sensitive Hoarder": 16
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Snotty Slug": 32,
+   "Explosive Seed": 34
+  },
+  "teamB": {
+   "Maniacal Forager": 12,
+   "Portal": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Grenade Mercenary": 6,
+   "Self-Destruct Ice Slug": 21,
+   "Super Floor Scrubber": 2
+  },
+  "teamB": {
+   "Smashing Stones": 1,
+   "Explosive Seed": 23,
+   "Traffic Tower Production Model": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Flamelet and Softsteel": 6
+  },
+  "teamB": {
+   "Chained-up Pugilist": 8
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Guardian of Quick-Wins": 6
+  },
+  "teamB": {
+   "Lamplighter Knight": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Criminal Funboat": 2,
+   "Go! Carcass!": 9
+  },
+  "teamB": {
+   "Chained-up Pugilist": 6,
+   "Pacifist": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Megamus": 4,
+   "Coat-hanger Marksman": 9
+  },
+  "teamB": {
+   "Relaxed Burdenbeast": 2,
+   "Manifestation of Suffering": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Knights Together Strong": 1
+  },
+  "teamB": {
+   "Starry Magician": 9,
+   "Lamplighter Knight": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Snotty Slug": 29,
+   "Miasma Swarm": 6
+  },
+  "teamB": {
+   "Jesselton Williams": 2,
+   "Lost Cadence": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Megamus": 6,
+   "Self-Destruct Ice Slug": 18
+  },
+  "teamB": {
+   "Pacifist": 4,
+   "Sober Ink Spirit": 44
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chained-up Pugilist": 8
+  },
+  "teamB": {
+   "Sensitive Hoarder": 12
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Super Punch Robo": 3
+  },
+  "teamB": {
+   "Prickly Rocks": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coat-hanger Marksman": 16
+  },
+  "teamB": {
+   "Mutant Carnivorous Plant": 2,
+   "Flamelet and Softsteel": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Jesselton Williams": 1,
+   "Javelin Sea Terror": 6
+  },
+  "teamB": {
+   "Firewood Knight": 3,
+   "Super Punch Robo": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Will of Arbitration": 1
+  },
+  "teamB": {
+   "Big Axe": 3,
+   "Javelin Sea Terror": 7
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Javelin Sea Terror": 10,
+   "Originium Limbs": 7
+  },
+  "teamB": {
+   "Flamelet and Softsteel": 8,
+   "Smashing Stones": 1
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Javelin Sea Terror": 11,
+   "Flamelet and Softsteel": 8
+  },
+  "teamB": {
+   "Self-Destruct Ice Slug": 20,
+   "Mortar Shell Thrower": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Guardian of Quick-Wins": 5,
+   "Grenade Mercenary": 7
+  },
+  "teamB": {
+   "Starving Vanguard": 4,
+   "Traffic Tower Production Model": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rubber Bullet Sniper": 30,
+   "Self-Destruct Ice Slug": 23
+  },
+  "teamB": {
+   "Criminal Funboat": 3,
+   "Mutant Carnivorous Plant": 2,
+   "Super Floor Scrubber": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Spear of Mutation": 4
+  },
+  "teamB": {
+   "Pompeii": 1
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Self-Destruct Ice Slug": 16
+  },
+  "teamB": {
+   "Portal": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Starry Magician": 13
+  },
+  "teamB": {
+   "Chained-up Pugilist": 7,
+   "Insufficient Sleep": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Grenade Mercenary": 6,
+   "Firewood Knight": 3
+  },
+  "teamB": {
+   "Snotty Slug": 18,
+   "Resort Off-road Vehicle": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Insufficient Sleep": 4
+  },
+  "teamB": {
+   "Self-Destruct Ice Slug": 14
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Destabilized Emotions": 4
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 13
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Amplifying Caster": 3,
+   "Firewood Knight": 3
+  },
+  "teamB": {
+   "Common Mus": 28,
+   "Miasma Swarm": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Grenade Mercenary": 5,
+   "Starry Magician": 9
+  },
+  "teamB": {
+   "Manifestation of Suffering": 3,
+   "Miasma Swarm": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Knights Together Strong": 1
+  },
+  "teamB": {
+   "Manifestation of Suffering": 4,
+   "Lamplighter Knight": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Pacifist": 4,
+   "Go! Carcass!": 12
+  },
+  "teamB": {
+   "Rainbowvore Blade": 5,
+   "Grenade Mercenary": 5
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Mutant Carnivorous Plant": 3,
+   "Relaxed Burdenbeast": 3
+  },
+  "teamB": {
+   "Starving Vanguard": 3,
+   "Jesselton Williams": 1
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Snotty Slug": 28,
+   "Pacifist": 5
+  },
+  "teamB": {
+   "Flamelet and Softsteel": 8,
+   "Explosive Seed": 33
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Originium Limbs": 7
+  },
+  "teamB": {
+   "Relaxed Burdenbeast": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Prickly Rocks": 5
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 12
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Portal": 2,
+   "Flamelet and Softsteel": 5
+  },
+  "teamB": {
+   "Pompeii": 2,
+   "Amplifying Caster": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Portal": 2,
+   "Smashing Stones": 2
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 11,
+   "Insufficient Sleep": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chivalrous Trio": 1
+  },
+  "teamB": {
+   "Manifestation of Suffering": 4,
+   "Ordinary Sarkaz": 13
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Criminal Funboat": 3,
+   "Chocolate Custard Slug": 24
+  },
+  "teamB": {
+   "Lost Cadence": 7,
+   "Jesselton Williams": 1
+  },
+  "winner": "A",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Relaxed Burdenbeast": 3,
+   "Resort Off-road Vehicle": 6
+  },
+  "teamB": {
+   "Mortar Shell Thrower": 4,
+   "Firewood Knight": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Starry Magician": 13,
+   "Miasma Swarm": 8
+  },
+  "teamB": {
+   "Firewood Knight": 4,
+   "Lamplighter Knight": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Flamelet and Softsteel": 11,
+   "Relaxed Burdenbeast": 4
+  },
+  "teamB": {
+   "Super Floor Scrubber": 2,
+   "Chocolate Custard Slug": 26,
+   "Starry Magician": 11
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Samivilinn": 1,
+   "Rainbowvore Blade": 5,
+   "Ordinary Sarkaz": 12
+  },
+  "teamB": {
+   "Chivalrous Trio": 1,
+   "Self-Destruct Ice Slug": 17,
+   "Super Floor Scrubber": 1
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coldhands Caster": 8
+  },
+  "teamB": {
+   "Super Punch Robo": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Grenade Mercenary": 6
+  },
+  "teamB": {
+   "Big Snowball Thrower": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Starving Vanguard": 2,
+   "Smashing Stones": 1
+  },
+  "teamB": {
+   "Traffic Tower Production Model": 3
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Maniacal Forager": 7,
+   "Lamplighter Knight": 4
+  },
+  "teamB": {
+   "Rubber Bullet Sniper": 18,
+   "Megamus": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chivalrous Trio": 1
+  },
+  "teamB": {
+   "Lost Cadence": 9,
+   "Originium Limbs": 11
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Traffic Tower Production Model": 3,
+   "Portal": 3
+  },
+  "teamB": {
+   "Age of Utensils": 5,
+   "Self-Destruct Ice Slug": 17
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Snotty Slug": 27,
+   "Manifestation of Suffering": 4
+  },
+  "teamB": {
+   "Pacifist": 5,
+   "Prickly Rocks": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rainbowvore Blade": 4
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 11
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Lost Cadence": 6
+  },
+  "teamB": {
+   "Criminal Funboat": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Rainbowvore Blade": 6
+  },
+  "teamB": {
+   "Firewood Knight": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Relaxed Burdenbeast": 2,
+   "Flamelet and Softsteel": 7
+  },
+  "teamB": {
+   "Go! Carcass!": 12,
+   "Coat-hanger Marksman": 9
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Knights Together Strong": 1
+  },
+  "teamB": {
+   "Mech Crocodile": 13,
+   "Common Mus": 58
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Jesselton Williams": 2,
+   "Flamelet and Softsteel": 8
+  },
+  "teamB": {
+   "Lost Cadence": 7,
+   "Resort Off-road Vehicle": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Mortar Shell Thrower": 5,
+   "Big Axe": 4
+  },
+  "teamB": {
+   "Lamplighter Knight": 6,
+   "Super Floor Scrubber": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Resort Off-road Vehicle": 4
+  },
+  "teamB": {
+   "Prickly Rocks": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Destabilized Emotions": 5
+  },
+  "teamB": {
+   "Prickly Rocks": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Spear of Mutation": 3,
+   "Javelin Sea Terror": 5
+  },
+  "teamB": {
+   "Flamelet and Softsteel": 5,
+   "Sober Ink Spirit": 27
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Grenade Mercenary": 5
+  },
+  "teamB": {
+   "Chained-up Pugilist": 9
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Big Snowball Thrower": 4
+  },
+  "teamB": {
+   "Sensitive Hoarder": 14
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Insufficient Sleep": 4,
+   "Snotty Slug": 17
+  },
+  "teamB": {
+   "Traffic Tower Production Model": 1,
+   "Mutant Carnivorous Plant": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Mech Crocodile": 6,
+   "Traffic Tower Production Model": 1
+  },
+  "teamB": {
+   "Smashing Stones": 2,
+   "Lost Cadence": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Manifestation of Suffering": 4,
+   "Flamelet and Softsteel": 6
+  },
+  "teamB": {
+   "Pacifist": 4,
+   "Insufficient Sleep": 6
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Saint Carmen": 7
+  },
+  "teamB": {
+   "Explosive Seed": 33,
+   "Big Snowball Thrower": 5
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Chained-up Pugilist": 12,
+   "Sober Ink Spirit": 42
+  },
+  "teamB": {
+   "Flamelet and Softsteel": 7,
+   "Traffic Tower Production Model": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Portal": 3,
+   "Manifestation of Suffering": 4
+  },
+  "teamB": {
+   "Javelin Sea Terror": 9,
+   "Rainbowvore Blade": 5
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Miasma Swarm": 5,
+   "Big Snowball Thrower": 4,
+   "Prickly Rocks": 4
+  },
+  "teamB": {
+   "Coat-hanger Marksman": 10,
+   "Flamelet and Softsteel": 7,
+   "Mortar Shell Thrower": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Pompeii": 2,
+   "Manifestation of Suffering": 3,
+   "Resort Off-road Vehicle": 5
+  },
+  "teamB": {
+   "Mech Crocodile": 8,
+   "Rubber Bullet Sniper": 23,
+   "Snotty Slug": 29
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coldhands Caster": 9
+  },
+  "teamB": {
+   "Traffic Tower Production Model": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Snotty Slug": 23
+  },
+  "teamB": {
+   "Tornado Ninja": 4
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Starving Vanguard": 2,
+   "Pompeii": 1
+  },
+  "teamB": {
+   "Rainbowvore Blade": 6
+  },
+  "winner": "B",
+  "storm": true
+ },
+ {
+  "teamA": {
+   "Coat-hanger Marksman": 10,
+   "Mortar Shell Thrower": 2
+  },
+  "teamB": {
+   "Mutant Carnivorous Plant": 2,
+   "Super Blast Robo": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Smashing Stones": 1,
+   "Resort Off-road Vehicle": 6
+  },
+  "teamB": {
+   "Saint Carmen": 3,
+   "Jesselton Williams": 1
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Knights Together Strong": 1
+  },
+  "teamB": {
+   "Flamelet and Softsteel": 10,
+   "Crabby Grandpa": 2
+  },
+  "winner": "A",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Go! Carcass!": 15,
+   "Pompeii": 2
+  },
+  "teamB": {
+   "Relaxed Burdenbeast": 2,
+   "Super Floor Scrubber": 3
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Prickly Rocks": 7,
+   "Lamplighter Knight": 6
+  },
+  "teamB": {
+   "Amplifying Caster": 5,
+   "Jesselton Williams": 2
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Super Punch Robo": 4,
+   "Tornado Ninja": 5
+  },
+  "teamB": {
+   "Prickly Rocks": 8,
+   "Criminal Funboat": 4
+  },
+  "winner": "B",
+  "storm": false
+ },
+ {
+  "teamA": {
+   "Coat-hanger Marksman": 16,
+   "Big Snowball Thrower": 4,
+   "Maniacal Forager": 8
+  },
+  "teamB": {
+   "Still Signore dei Lupi": 1,
+   "Starving Vanguard": 3,
+   "Tornado Ninja": 3
+  },
+  "winner": "A",
+  "storm": false
  }
 ]

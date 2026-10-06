@@ -151,6 +151,18 @@
     ];
   }
 
+  // Antisymmetric matchup features for XGBoost: swapping A and B exactly negates every entry,
+  // so the model can reuse the same "(A vs B) = -(B vs A)" augmentation as the raw count diffs.
+  function pairDiffFeatures(unitsA, unitsB) {
+    const sA = teamStats(unitsA), sB = teamStats(unitsB);
+    const fA = teamFeatures(sA), fB = teamFeatures(sB);
+    const dpsAB = Math.max(effectiveDps(unitsA, sB.avgDef, sB.avgRes), 1e-3);
+    const dpsBA = Math.max(effectiveDps(unitsB, sA.avgDef, sA.avgRes), 1e-3);
+    const logTtkA = Math.log(Math.max(sB.hp, 1) / dpsAB);
+    const logTtkB = Math.log(Math.max(sA.hp, 1) / dpsBA);
+    return [...fA.map((v, i) => v - fB[i]), clamp(logTtkB - logTtkA, -10, 10)];
+  }
+
   // ---------------------------------------------------------------------------
   // Base Models
   // ---------------------------------------------------------------------------
@@ -235,8 +247,14 @@
       this.xgbSubsample = options.xgbSubsample ?? 0.85;
       this.xgbColsample = options.xgbColsample ?? 0.85;
       this.xgbStormWeight = options.xgbStormWeight ?? 0.75;
-      this.nnEpochs = options.nnEpochs ?? 80;
-      this.nnHidden = options.nnHidden ?? [24, 12];
+      this.xgbEngineered = options.xgbEngineered ?? true; // give XGB the engineered matchup features too
+      // Neural net: smaller, shorter training, stronger L2, clipped inputs, seed-averaged
+      this.nnEpochs = options.nnEpochs ?? 30;
+      this.nnHidden = options.nnHidden ?? [16, 8];
+      this.nnLr = options.nnLr ?? 0.003;
+      this.nnWd = options.nnWd ?? 0.01;
+      this.nnClip = options.nnClip ?? 5;       // clamp normalized inputs to +/- this many std devs
+      this.nnEnsemble = options.nnEnsemble ?? 3; // number of independently seeded nets averaged
       this.folds = options.folds ?? 3;
       this.seed = options.seed ?? 42;
 
@@ -299,11 +317,17 @@
     }
 
     _trainXGB(matches, enemies, rng) {
-      const n = matches.length, d = enemies.length, nTotal = 2 * n;
+      const n = matches.length, nRaw = enemies.length, nTotal = 2 * n;
       const lambda = this.xgbLambda, gamma = this.xgbGamma, minChild = this.xgbMinChildWeight;
       const lr = this.xgbLr, maxDepth = this.xgbDepth;
       const cnt = (team, e) => Number((team && team[e]) || 0) || 0;
       const sig = (z) => (z > 20 ? 1 : z < -20 ? 0 : 1 / (1 + Math.exp(-z)));
+
+      // Optional engineered matchup features (antisymmetric), appended after the raw enemy columns
+      const engOf = (tA, tB) => pairDiffFeatures(this._expandTeam(tA), this._expandTeam(tB));
+      const engRows = this.xgbEngineered ? matches.map((m) => engOf(m.teamA, m.teamB)) : null;
+      const eDim = engRows ? engRows[0].length : 0;
+      const d = nRaw + eDim;
 
       // Antisymmetric augmentation: every match appears as (A vs B) and (B vs A)
       const X = new Float64Array(nTotal * d), y = new Float64Array(nTotal), sw = new Float64Array(nTotal);
@@ -313,10 +337,15 @@
         const w = m.storm === true ? this.xgbStormWeight : 1.0;
         y[s] = lbl; y[s + n] = 1 - lbl;
         sw[s] = w; sw[s + n] = w;
-        for (let j = 0; j < d; j++) {
+        for (let j = 0; j < nRaw; j++) {
           const f = Math.sqrt(cnt(m.teamA, enemies[j])) - Math.sqrt(cnt(m.teamB, enemies[j]));
           X[s * d + j] = f;
           X[(s + n) * d + j] = -f;
+        }
+        for (let k = 0; k < eDim; k++) {
+          const f = engRows[s][k];
+          X[s * d + nRaw + k] = f;
+          X[(s + n) * d + nRaw + k] = -f;
         }
       }
 
@@ -406,14 +435,15 @@
       return {
         predict: (tA, tB) => {
           const x = new Float64Array(d);
-          for (let j = 0; j < d; j++) x[j] = Math.sqrt(cnt(tA, enemies[j])) - Math.sqrt(cnt(tB, enemies[j]));
+          for (let j = 0; j < nRaw; j++) x[j] = Math.sqrt(cnt(tA, enemies[j])) - Math.sqrt(cnt(tB, enemies[j]));
+          if (eDim) { const e = engOf(tA, tB); for (let k = 0; k < eDim; k++) x[nRaw + k] = e[k]; }
           const neg = x.map((v) => -v);
           return 0.5 * (sig(margin(x)) + (1 - sig(margin(neg))));
         },
       };
     }
 
-    _trainNN(matches, rng) {
+    _trainNNOnce(matches, rng) {
       const rawX = [], rawY = [];
       for (const m of matches) {
         const uA = this._expandTeam(m.teamA), uB = this._expandTeam(m.teamB);
@@ -426,7 +456,10 @@
       for (const x of rawX) for (let j = 0; j < dim; j++) std[j] += (x[j] - mean[j]) ** 2 / rawX.length;
       for (let j = 0; j < dim; j++) std[j] = Math.sqrt(std[j]) || 1;
 
-      const normVec = (v) => v.map((x, j) => (x - mean[j]) / std[j]);
+      // Clamp z-scores: a rare flag has a tiny std, so one unusual unit would otherwise become a
+      // huge input and push the network into extreme, confidently-wrong outputs.
+      const clip = this.nnClip;
+      const normVec = (v) => v.map((x, j) => clamp((x - mean[j]) / std[j], -clip, clip));
       const X = rawX.map(normVec), Y = rawY;
 
       const sizes = [dim, ...this.nnHidden, 1];
@@ -448,16 +481,16 @@
           const c1 = 1 - Math.pow(0.9, step), c2 = 1 - Math.pow(0.999, step);
           for (let l = 0; l < net.L; l++) {
             for (let k = 0; k < net.W[l].length; k++) {
-              const g = gW[l][k] / batch.length + 0.003 * net.W[l][k];
+              const g = gW[l][k] / batch.length + this.nnWd * net.W[l][k];
               mW[l][k] = 0.9 * mW[l][k] + 0.1 * g;
               vW[l][k] = 0.999 * vW[l][k] + 0.001 * g * g;
-              net.W[l][k] -= (0.003 * (mW[l][k] / c1)) / (Math.sqrt(vW[l][k] / c2) + 1e-8);
+              net.W[l][k] -= (this.nnLr * (mW[l][k] / c1)) / (Math.sqrt(vW[l][k] / c2) + 1e-8);
             }
             for (let k = 0; k < net.b[l].length; k++) {
               const g = gb[l][k] / batch.length;
               mB[l][k] = 0.9 * mB[l][k] + 0.1 * g;
               vB[l][k] = 0.999 * vB[l][k] + 0.001 * g * g;
-              net.b[l][k] -= (0.003 * (mB[l][k] / c1)) / (Math.sqrt(vB[l][k] / c2) + 1e-8);
+              net.b[l][k] -= (this.nnLr * (mB[l][k] / c1)) / (Math.sqrt(vB[l][k] / c2) + 1e-8);
             }
           }
         }
@@ -469,6 +502,23 @@
           const fwd = normVec(buildNnFeatures(uA, uB, !!storm));
           const swp = normVec(buildNnFeatures(uB, uA, !!storm));
           return 0.5 * (net.predict(fwd) + (1 - net.predict(swp)));
+        },
+      };
+    }
+
+    // Train several independently seeded nets and average their probabilities. This reduces the
+    // run-to-run variance that made single-net results swing a lot between folds.
+    _trainNN(matches, rng) {
+      const members = [];
+      const k = Math.max(1, this.nnEnsemble | 0);
+      for (let i = 0; i < k; i++) {
+        members.push(this._trainNNOnce(matches, mulberry32(Math.floor(rng() * 2147483647))));
+      }
+      return {
+        predict: (tA, tB, storm) => {
+          let sum = 0;
+          for (const mm of members) sum += mm.predict(tA, tB, storm);
+          return sum / members.length;
         },
       };
     }

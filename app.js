@@ -14,9 +14,9 @@
 (function () {
   'use strict';
 
-  const MODEL_URL = 'model.json';
-  const ENEMIES_URL = 'duel_channel_enemies.json';
-  const MATCHES_URL = 'matches.json'; // only used by the fallback
+  const MODEL_URL = 'stack.json';
+  const ENEMIES_URL = 'data/duel_channel_enemies.json';
+  const MATCHES_URL = 'data/matches.json'; // only used by the fallback
 
   const $ = (id) => document.getElementById(id);
   const statusEl = $('status');
@@ -59,7 +59,7 @@
       model = DuelStackModel.fromJSON(saved, enemies);
     } else {
       const matches = (await fetchJson(MATCHES_URL)).filter((m) => m.winner === 'A' || m.winner === 'B');
-      setStatus(`No model.json found. Training on ${matches.length} matches in the browser; ` +
+      setStatus(`No stack.json found. Training on ${matches.length} matches in the browser; ` +
         'the page will freeze for a minute or more…');
       await new Promise((resolve) => setTimeout(resolve, 50)); // let the message paint first
       console.time('fit');

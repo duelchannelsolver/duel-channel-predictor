@@ -1,7 +1,22 @@
 /**
- * DuelStackModel (stack.js) - Pure Browser Version
- * No Node.js dependencies (no require, no fs, no path).
- * Mounts directly to window.DuelStackModel.
+ * DuelStackModel (stack.js) - Browser & Node.js Universal Version
+ * Mounts to window.DuelStackModel, global.DuelStackModel, and module.exports.
+ *
+ * v4
+ *  - Combat simulator: a 2-D battle that models about 25 special mechanics
+ *    parsed from each enemy's ability text (instant kills, one-shot attackers,
+ *    on-death explosions and spawns, revives and second forms, stuns and cold,
+ *    burn and damage-over-time, DEF shred, ammo, lifesteal, thorns, periodic
+ *    skills and more). Its results are fed to every base model as features.
+ *  - Ensemble: equal-weight logit average of a "wide" L2-regularised logistic
+ *    regression (unit counts + team stats + simulator) and gradient-boosted
+ *    trees. Options: { useNN: true } adds the neural net as a third model,
+ *    { stacking: true } fits the ensemble weights instead of using equal ones.
+ *  - Storm is not a model input (it is only known after the match). The `storm`
+ *    argument of predict* is accepted and ignored; storm-flagged training rows
+ *    are down-weighted (stormWeight).
+ *  - predictDetailed().weights is ordered [wide, nn, xgb]; `nn` is null unless
+ *    the neural net is enabled.
  */
 (function (global) {
   'use strict';
@@ -33,7 +48,17 @@
     return arr;
   }
 
-  const sigmoid = (z) => 1 / (1 + Math.exp(-z));
+  // FNV-1a string hash -> 32-bit int, used to derive deterministic simulator seeds
+  function hashString(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h | 0;
+  }
+
+  const sigmoid = (z) => (z > 30 ? 1 : z < -30 ? 0 : 1 / (1 + Math.exp(-z)));
   const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
   const logit = (p) => {
     const c = clamp(p, 1e-6, 1 - 1e-6);
@@ -48,15 +73,15 @@
   // ---------------------------------------------------------------------------
   // Domain Stats & Feature Extraction
   // ---------------------------------------------------------------------------
-    const ABILITY_FLAGS = {
+  const ABILITY_FLAGS = {
     stun: (t) => {
-  const clean = t
-    .replace(/immune to stun( and freeze)?/g, '')
-    .replace(/immune to cold/g, '');
-  if (/\bstuns?\b/.test(clean)) return 1;               // full stun
-  if (/inflict\w*[^.]*\bcold\b/.test(clean)) return 0.5; // cold: 2 stacks to freeze
-  return 0;
-},
+      const clean = t
+        .replace(/immune to stun( and freeze)?/g, '')
+        .replace(/immune to cold/g, '');
+      if (/\bstuns?\b/.test(clean)) return 1;
+      if (/inflict\w*[^.]*\bcold\b/.test(clean)) return 0.5;
+      return 0;
+    },
     revive:    (t) => /revive/.test(t),
     barrier:   (t) => /barrier|shield/.test(t),
     aoe:       (t) => /splash|adjacent|radius|up to (two|three|four|\d+) targets|jump between|entire column|every row/.test(t),
@@ -67,10 +92,11 @@
     tanky:     (t) => /takes -\d+%|dodge|immune|status resistance/.test(t),
     selfBuff:  (t) => /gains|enraged|overdrive|\+\d+% atk/.test(t),
     burst:     (t) => /explodes|burst/.test(t),
-	suicide: (t) => /loses (300|50)\b/.test(t),
-	token: (t) => /\bspawns\b(?!\s+by\b)/.test(t),
+    suicide:   (t) => /loses (300|50)\b/.test(t),
+    token:     (t) => /\bspawns\b(?!\s+by\b)/.test(t),
   };
   const FLAG_NAMES = Object.keys(ABILITY_FLAGS);
+  const WORD_NUM = { two: 2, three: 3, four: 4 };
 
   function makeUnit(e) {
     const dmgType = String(e.Damage || '').toLowerCase();
@@ -78,6 +104,7 @@
     const text = String(e['Special Ability'] || '').toLowerCase();
     const range = e['Attack Range'] === 'Global' ? 10 : num(e['Attack Range'], 0.8);
     const atk = num(e.ATK, 0);
+
     return {
       name: e.Name,
       hp: num(e.HP, 0),
@@ -89,9 +116,10 @@
       range,
       physShare,
       flags: FLAG_NAMES.map((f) => {
-  const v = ABILITY_FLAGS[f](text);
-  return typeof v === 'number' ? v : (v ? 1 : 0);
-}),
+        const v = ABILITY_FLAGS[f](text);
+        return typeof v === 'number' ? v : (v ? 1 : 0);
+      }),
+      sim: parseSim(e, text, dmgType, atk),
     };
   }
 
@@ -138,21 +166,7 @@
     ];
   }
 
-  function buildNnFeatures(unitsA, unitsB, storm) {
-    const sA = teamStats(unitsA), sB = teamStats(unitsB);
-    const dpsAB = Math.max(effectiveDps(unitsA, sB.avgDef, sB.avgRes), 1e-3);
-    const dpsBA = Math.max(effectiveDps(unitsB, sA.avgDef, sA.avgRes), 1e-3);
-    const logTtkA = Math.log(Math.max(sB.hp, 1) / dpsAB);
-    const logTtkB = Math.log(Math.max(sA.hp, 1) / dpsBA);
-    return [
-      ...teamFeatures(sA), ...teamFeatures(sB),
-      clamp(logTtkA, -10, 15), clamp(logTtkB, -10, 15), clamp(logTtkB - logTtkA, -10, 10),
-      storm ? 1 : 0,
-    ];
-  }
-
-  // Antisymmetric matchup features for XGBoost: swapping A and B exactly negates every entry,
-  // so the model can reuse the same "(A vs B) = -(B vs A)" augmentation as the raw count diffs.
+  // Antisymmetric (A minus B) engineered features
   function pairDiffFeatures(unitsA, unitsB) {
     const sA = teamStats(unitsA), sB = teamStats(unitsB);
     const fA = teamFeatures(sA), fB = teamFeatures(sB);
@@ -163,8 +177,21 @@
     return [...fA.map((v, i) => v - fB[i]), clamp(logTtkB - logTtkA, -10, 10)];
   }
 
+  // Per-team (not differenced) features for the neural net, plus time-to-kill terms
+  function buildNnStatFeatures(unitsA, unitsB) {
+    const sA = teamStats(unitsA), sB = teamStats(unitsB);
+    const dpsAB = Math.max(effectiveDps(unitsA, sB.avgDef, sB.avgRes), 1e-3);
+    const dpsBA = Math.max(effectiveDps(unitsB, sA.avgDef, sA.avgRes), 1e-3);
+    const logTtkA = Math.log(Math.max(sB.hp, 1) / dpsAB);
+    const logTtkB = Math.log(Math.max(sA.hp, 1) / dpsBA);
+    return [
+      ...teamFeatures(sA), ...teamFeatures(sB),
+      clamp(logTtkA, -10, 15), clamp(logTtkB, -10, 15), clamp(logTtkB - logTtkA, -10, 10),
+    ];
+  }
+
   // ---------------------------------------------------------------------------
-  // Base Models
+  // Neural net (small ReLU MLP with a sigmoid output)
   // ---------------------------------------------------------------------------
   class BrowserMLP {
     constructor(sizes, rng) {
@@ -204,10 +231,11 @@
 
     predict(x) { return this.forward(x, null); }
 
-    backward(x, y, gW, gb) {
+    // Accumulates the gradient of (weight * log loss) for one sample into gW / gb
+    backward(x, y, weight, gW, gb) {
       const cache = {};
       const p = this.forward(x, cache);
-      let dz = new Float64Array([p - y]);
+      let dz = new Float64Array([(p - y) * weight]);
       for (let l = this.L - 1; l >= 0; l--) {
         const nin = this.sizes[l], nout = this.sizes[l + 1];
         const aPrev = cache.a[l];
@@ -233,11 +261,515 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Combat simulator
+  // ---------------------------------------------------------------------------
+  // Reads the simulator's view of a unit out of its stat block and ability text.
+  function parseSim(e, text, dmgType, atk) {
+    const numWord = (w) => WORD_NUM[w] || parseInt(w, 10) || 1;
+    const s = {
+      ms: num(e['Movement Speed'], 0.5),
+      ai: num(e['Attack Interval'], 3),
+      range: e['Attack Range'] === 'Global' ? 10 : num(e['Attack Range'], 0.8),
+      phys: dmgType.startsWith('arts') ? 0 : 1,
+      targets: 1, splash: 0, regen: 0,
+    };
+    let m;
+    if ((m = /up to (two|three|four|\d+) targets/.exec(text))) s.targets = numWord(m[1]);
+    if (/splash|adjacent 4|surrounding 8/.test(text)) s.splash = 1.0;
+    if ((m = /targets within range with (\d+)% atk/.exec(text))) s.atkMult = parseFloat(m[1]) / 100;
+    if ((m = /regenerates (\d+) hp/.exec(text))) s.regen += parseFloat(m[1]);
+    if ((m = /loses (\d+) hp every second/.exec(text))) s.regen -= parseFloat(m[1]);
+
+    // One-shot / instant-kill attackers
+    if (/launching itself/.test(text)) s.suicide = true;
+    if (/devours the target when attacking for the first time/.test(text)) s.devourFirst = true;
+    if ((m = /devours an enemy within a range of ([\d.]+)[^]*?digesting for (\d+) seconds/.exec(text))) {
+      s.devourer = true; s.range = parseFloat(m[1]); s.ai = parseFloat(m[2]);
+    }
+
+    // On-death effects
+    if ((m = /(?:explodes[^.]*when defeated|when defeated[^.]*burst)[^.]*?(\d+)% atk (physical|arts) damage[^.]*?radius of ([\d.]+)/.exec(text))) {
+      s.deathExplode = { dmg: (parseFloat(m[1]) / 100) * atk, phys: m[2] === 'physical' ? 1 : 0, radius: parseFloat(m[3]), stun: 0, cold: 0 };
+      const ms = /radius of [\d.]+ and stuns them for (\d+)/.exec(text);
+      if (ms) s.deathExplode.stun = parseFloat(ms[1]);
+      const mc = /inflicts cold for (\d+) seconds to nearby/.exec(text);
+      if (mc) s.deathExplode.cold = parseFloat(mc[1]);
+    }
+    if (/when defeated|explodes/.test(text) && (m = /spawns an? ([a-z\- ]+?) on the spot/.exec(text))) s.spawnName = m[1];
+    if (/when defeated, abducts an enemy/.test(text)) s.abduct = true;
+    if ((m = /revives (?:with (\d+)% hp )?over (\d+) seconds/.exec(text))) {
+      s.revive = { frac: m[1] ? parseFloat(m[1]) / 100 : 1, delay: parseFloat(m[2]), inv: /invulnerable for (\d+) seconds/.test(text) ? 10 : 0 };
+    }
+
+    // Crowd control
+    if ((m = /after (two|three|four|\d+) attacks, the next attack[^.]*stuns (?:the target|them) for (\d+) seconds/.exec(text))) {
+      s.stunEvery = { n: numWord(m[1]), dur: parseFloat(m[2]) };
+    }
+    if ((m = /after (two|three|four|\d+) attacks, the next attack inflicts cold for (\d+) seconds/.exec(text))) {
+      s.coldEvery = { n: numWord(m[1]), dur: parseFloat(m[2]) };
+    }
+    if (/immune to stun/.test(text)) s.stunImmune = true;
+    if (/status resistance/.test(text)) s.statusRes = true;
+
+    // Damage-over-time, thorns, debuffs
+    if ((m = /when taking damage, deals (\d+) arts damage to the source/.exec(text))) s.thorns = parseFloat(m[1]);
+    if ((m = /inflict (\d+)% atk burn/.exec(text))) s.burn = (parseFloat(m[1]) / 100) * atk;
+    if ((m = /for (\d+) seconds that deals (\d+) arts damage every (second|[\d.]+ seconds)/.exec(text))) {
+      const per = m[3] === 'second' ? 1 : parseFloat(m[3]);
+      s.dot = { dur: parseFloat(m[1]), dps: parseFloat(m[2]) / (per || 1) };
+    }
+    if ((m = /attacks inflict -(\d+) def on the target/.exec(text))) s.shred = parseFloat(m[1]);
+    if ((m = /loses (\d+) def and (\d+) res each time/.exec(text))) s.selfShred = { def: parseFloat(m[1]), res: parseFloat(m[2]) };
+
+    // Attack modifiers
+    if ((m = /initially has (\d+) broken blades[^.]*\+(\d+)% atk/.exec(text))) s.ammo = { n: parseFloat(m[1]), mult: 1 + parseFloat(m[2]) / 100 };
+    if ((m = /has (\d+)\/\d+ (?:ammo|copper coin)[^]*?with (\d+)% atk/.exec(text))) s.ammo = { n: parseFloat(m[1]), mult: parseFloat(m[2]) / 100 };
+    if ((m = /restores hp equal to (\d+)% of the damage dealt/.exec(text))) s.lifesteal = parseFloat(m[1]) / 100;
+    if (/starts in the imprisoned state/.test(text)) {
+      s.imprisoned = { ignoreDef: /ignoring 60% def/.test(text) ? 0.6 : 0, toArts: /attacks dealing arts damage/.test(text) };
+    }
+    if ((m = /has \+(\d+)% atk (?:and takes -(\d+)%[^.]*)?while hp is below 50%/.exec(text))) {
+      s.lowHp = { atk: 1 + parseFloat(m[1]) / 100, taken: m[2] ? 1 - parseFloat(m[2]) / 100 : 1 };
+    }
+    if ((m = /gains (\d+)% atk and (\d+) aspd each time an ally is defeated/.exec(text))) s.avenger = { atk: parseFloat(m[1]) / 100, aspd: parseFloat(m[2]) };
+    if ((m = /from a range of ([\d.]+), dealing (\d+)% atk (arts|physical) damage[^]*?once per round/.exec(text))) {
+      s.opener = { range: parseFloat(m[1]), mult: parseFloat(m[2]) / 100, phys: m[3] === 'physical' ? 1 : 0 };
+    }
+    if (/charges forth/.test(text)) s.charger = true;
+    if ((m = /while hp is below 50%: takes -(\d+)% physical and arts damage/.exec(text))) s.lowHp = { atk: 1, taken: 1 - parseFloat(m[1]) / 100 };
+    if ((m = /while moving, deals (\d+)% atk physical damage to enemies/.exec(text))) s.opener = { range: s.range, mult: parseFloat(m[1]) / 100, phys: 1 };
+    if ((m = /becomes enraged when the ([a-z ]+) is defeated, gaining (\d+)% atk, \d+% mspd, and (\d+) aspd/.exec(text))) {
+      s.enrage = { partner: m[1], atk: 1 + parseFloat(m[2]) / 100, aspd: parseFloat(m[3]) };
+    }
+    // Periodic skills
+    if ((m = /channels for (\d+) seconds before unleashing a burst[^]*?deals (\d+)% atk arts damage[^]*?cooldown: \((\d+)\) (\d+) sec/.exec(text))) {
+      s.skill = { first: parseFloat(m[3]) + parseFloat(m[1]), cd: parseFloat(m[4]) + parseFloat(m[1]), mult: parseFloat(m[2]) / 100, phys: 0, radius: 1.5, stun: 0, range: s.range };
+    }
+    if ((m = /range of ([\d.]+), dealing (\d+)% atk physical damage and stunning the target for (\d+) seconds\. cooldown: (\d+) sec/.exec(text))) {
+      s.skill = { first: parseFloat(m[4]), cd: parseFloat(m[4]), mult: parseFloat(m[2]) / 100, phys: 1, radius: 0, stun: parseFloat(m[3]), range: parseFloat(m[1]) };
+    }
+    if ((m = /spins for[^]*?radius of ([\d.]+) takes (\d+)% atk physical damage every second[^]*?cooldown: (\d+) sec/.exec(text))) {
+      s.aura = { radius: parseFloat(m[1]), mult: parseFloat(m[2]) / 100, start: parseFloat(m[3]) };
+    }
+    if (/has status resistance and \+100 aspd/.test(text)) s.ai = s.ai / 2;
+
+    // Defensive
+    if ((m = /shield for (\d+) seconds after spawning which grants \+(\d+) def/.exec(text))) s.tempDef = { dur: parseFloat(m[1]), def: parseFloat(m[2]) };
+    if ((m = /gains 100% physical dodge for (\d+) seconds/.exec(text))) s.dodge = parseFloat(m[1]);
+    if ((m = /when attacked for the first time, gains[^.]*?(\d+) aspd for (\d+) seconds/.exec(text))) s.rage = { aspd: parseFloat(m[1]), dur: parseFloat(m[2]) };
+    if (/splitting into two/.test(text)) s.split = true;
+    if ((m = /^starts in the first form: immune to stun and takes -(\d+)%/.exec(text))) s.taken = 1 - parseFloat(m[1]) / 100;
+    if (/while present, the chivalrous trio takes -40%/.test(text)) s.trioAura = true;
+
+    // Two-form unit described only in prose
+    if (/starts in the jailer form/.test(text)) {
+      s.phys = 0; s.range = 3; s.resBonus = 70;
+      s.form2 = { phys: 1, range: 0.8, atk: 700, def: 1000, ai: -1.5, ms: 0.9 };
+    }
+    if (/enters the second form/.test(text)) s.form2 = { atkMult: 1.5, ai: -1.5, hits: 2 };
+    return s;
+  }
+
+  // 1-D battle. Teams start `arenaLength` tiles apart, each unit walks to its
+  // nearest enemy and attacks when in range. Physical damage = max(ATK - DEF,
+  // 5% ATK); Arts = max(ATK * (1 - RES%), 5% ATK). With mech=true the special
+  // abilities parsed above are also simulated. Returns (fraction of starting HP
+  // left on A) - (same for B).
+  function simulateBattle(unitsA, unitsB, opt, seed, mech) {
+    const rng = mulberry32(seed);
+    const L = opt.arenaLength, dt = opt.dt, spread = opt.spawnSpread;
+    const off = opt.disabled || {};
+    const E = [];
+    const tot = [0, 0];
+
+    const W = opt.arenaWidth || 0;
+    const dist = (a, bx, by) => Math.hypot(a.pos - bx, a.y - by);
+    const spawn = (u, side, pos, y, initial) => {
+      const s = u.sim;
+      const e = {
+        u, s, side, pos, y, hp: u.hp, hp0: u.hp,
+        atk: u.atk, def: u.def, res: u.res + (mech && s.resBonus ? s.resBonus : 0),
+        ai: s.ai, ms: s.ms, range: s.range, phys: s.phys, hits: 1,
+        cd: rng() * s.ai * 0.5, pend: 0, kill: false,
+        stunT: 0, coldT: 0, invT: 0, dodgeT: 0, reviveT: 0, revived: false,
+        nAtk: 0, ammo: 0, ammoMult: 1, imprisoned: false, ignoreDef: 0,
+        burn: 0, dotT: 0, dotDps: 0, shieldT: 0, rageT: 0, raged: false,
+        opener: null, devoured: false, splitDone: false, dodged: false,
+        avenge: 0, age: 0, trio: false, enraged: false, skillT: s.skill ? s.skill.first : 0,
+      };
+      if (mech) {
+        if (s.ammo && !off.ammo) { e.ammo = s.ammo.n; e.ammoMult = s.ammo.mult; }
+        if (s.imprisoned && !off.imprisoned) { e.imprisoned = true; e.ai = s.ai * 2; }
+        if (s.tempDef && !off.tempDef) { e.shieldT = s.tempDef.dur; e.def += s.tempDef.def; }
+        if (s.opener && !off.opener) e.opener = s.opener;
+        if (s.devourer) e.cd = 0;
+      }
+      if (initial) tot[side] += u.hp;
+      E.push(e);
+      return e;
+    };
+
+    for (const { u, n } of unitsA) {
+      const c = Math.max(0, Math.round(Number(n) || 0));
+      for (let i = 0; i < c; i++) spawn(u, 0, -rng() * spread, rng() * W, true);
+    }
+    for (const { u, n } of unitsB) {
+      const c = Math.max(0, Math.round(Number(n) || 0));
+      for (let i = 0; i < c; i++) spawn(u, 1, L + rng() * spread, rng() * W, true);
+    }
+    if (tot[0] <= 0 && tot[1] <= 0) return 0;
+    if (tot[0] <= 0) return -1;
+    if (tot[1] <= 0) return 1;
+
+    const TRIO = { 'Jade Twin-Swords': 1, 'Crimson Crescent Blade': 1, 'Ash Spear': 1 };
+    const isUp = (e) => e.hp > 0 && e.reviveT <= 0;
+    const curAtk = (e) => {
+      let a = e.atk;
+      if (mech) {
+        if (e.s.atkMult) a *= e.s.atkMult;
+        if (e.enraged) a *= e.s.enrage.atk;
+        if (e.avenge) a *= 1 + e.s.avenger.atk * e.avenge;
+        if (e.s.lowHp && !off.lowHp && e.hp < 0.5 * e.hp0) a *= e.s.lowHp.atk;
+      }
+      return a;
+    };
+    const applyStun = (t, dur) => {
+      if (t.s.stunImmune) return;
+      t.stunT = Math.max(t.stunT, t.s.statusRes ? dur / 2 : dur);
+    };
+    const applyCold = (t, dur) => {
+      if (t.s.statusRes) dur /= 2;
+      if (t.coldT > 0) { applyStun(t, dur); t.coldT = 0; } else t.coldT = dur; // Cold twice = Frozen
+    };
+    // Queue damage from src (may be null) onto t; returns the amount queued.
+    const strike = (src, t, raw, phys, ignoreDef) => {
+      if (t.invT > 0) return 0;
+      if (phys && t.dodgeT > 0) return 0;
+      let d = phys
+        ? Math.max(raw - t.def * (1 - (ignoreDef || 0)), 0.05 * raw)
+        : Math.max(raw * (1 - Math.min(t.res, 100) / 100), 0.05 * raw);
+      if (mech) {
+        if (t.s.taken) d *= t.s.taken;
+        if (t.trio) d *= 0.6;
+        if (t.s.lowHp && !off.lowHp && t.hp < 0.5 * t.hp0) d *= t.s.lowHp.taken;
+        if (t.s.selfShred && !off.selfShred) {
+          t.def = Math.max(0, t.def - t.s.selfShred.def); t.res = Math.max(0, t.res - t.s.selfShred.res);
+        }
+        if (src && t.s.thorns && !off.thorns) src.pend += Math.max(t.s.thorns * (1 - Math.min(src.res, 100) / 100), 0.05 * t.s.thorns);
+        if (t.s.rage && !off.rage && !t.raged) { t.raged = true; t.rageT = t.s.rage.dur; }
+      }
+      t.pend += d;
+      return d;
+    };
+
+    const maxSteps = Math.ceil(opt.maxTime / dt);
+    for (let step = 0; step < maxSteps; step++) {
+      // --- who is standing --------------------------------------------------
+      let up0 = 0, up1 = 0, pres0 = 0, pres1 = 0, jade0 = false, jade1 = false;
+      for (const e of E) {
+        if (e.reviveT > 0) {
+          e.reviveT -= dt;
+          if (e.side === 0) pres0++; else pres1++;
+          continue;
+        }
+        if (e.hp > 0) {
+          if (e.side === 0) { up0++; pres0++; } else { up1++; pres1++; }
+          if (mech && e.s.trioAura) { if (e.side === 0) jade0 = true; else jade1 = true; }
+        }
+      }
+      if (pres0 === 0 || pres1 === 0) break;
+      const N = E.length;
+
+      // --- timers, regeneration, damage over time ---------------------------
+      for (let i = 0; i < N; i++) {
+        const e = E[i];
+        if (!isUp(e)) continue;
+        e.age += dt;
+        e.trio = mech && TRIO[e.u.name] === 1 && (e.side === 0 ? jade0 : jade1);
+        if (e.invT > 0) e.invT -= dt;
+        if (e.dodgeT > 0) e.dodgeT -= dt;
+        if (e.coldT > 0) e.coldT -= dt;
+        if (e.rageT > 0) e.rageT -= dt;
+        if (e.shieldT > 0) { e.shieldT -= dt; if (e.shieldT <= 0) e.def = Math.max(0, e.def - e.s.tempDef.def); }
+        if (mech && e.s.regen) e.pend -= e.s.regen * dt;
+        if (e.dotT > 0) { e.dotT -= dt; e.pend += Math.min(e.dotDps * dt * (1 - Math.min(e.res, 100) / 100), Math.max(e.hp - 1, 0)); }
+      }
+
+      // --- targeting, attacks, movement --------------------------------------
+      for (let i = 0; i < N; i++) {
+        const e = E[i];
+        if (!isUp(e)) continue;
+        if (e.stunT > 0) { e.stunT -= dt; continue; }
+        let tg = null, bd = Infinity;
+        for (let j = 0; j < N; j++) {
+          const o = E[j];
+          if (o.side === e.side || !isUp(o)) continue;
+          const dd = dist(e, o.pos, o.y);
+          if (dd < bd) { bd = dd; tg = o; }
+        }
+        if (!tg) continue;
+        const s = e.s;
+        let rate = 1;
+        if (e.coldT > 0) rate *= 0.7;
+        if (e.rageT > 0) rate *= 1 + s.rage.aspd / 100;
+        if (e.avenge) rate *= 1 + (s.avenger.aspd * e.avenge) / 100;
+        if (e.enraged) rate *= 1 + s.enrage.aspd / 100;
+        e.cd -= dt * rate;
+
+        // Periodic skill (channelled burst, boulder)
+        if (mech && s.skill && !off.skill) {
+          e.skillT -= dt;
+          if (e.skillT <= 0) {
+            const k = s.skill;
+            let st = null, sd = Infinity;
+            for (let j = 0; j < N; j++) {
+              const o = E[j];
+              if (o.side === e.side || !isUp(o)) continue;
+              const dd = dist(e, o.pos, o.y) + (k.stun && o.stunT > 0 ? 100 : 0);
+              if (dd < sd) { sd = dd; st = o; }
+            }
+            if (st && dist(e, st.pos, st.y) <= k.range) {
+              const raw = curAtk(e) * k.mult, cx = st.pos, cy = st.y;
+              if (k.radius > 0) {
+                for (let j = 0; j < N; j++) {
+                  const o = E[j];
+                  if (o.side !== e.side && isUp(o) && dist(o, cx, cy) <= k.radius) strike(e, o, raw, k.phys, 0);
+                }
+              } else {
+                strike(e, st, raw, k.phys, 0);
+                if (k.stun) applyStun(st, k.stun);
+              }
+              e.skillT = k.cd;
+            }
+          }
+        }
+        // Damage aura that replaces normal attacks once it starts (spin)
+        if (mech && s.aura && !off.aura && e.age >= s.aura.start) {
+          const raw = curAtk(e) * s.aura.mult * dt;
+          for (let j = 0; j < N; j++) {
+            const o = E[j];
+            if (o.side !== e.side && isUp(o) && dist(e, o.pos, o.y) <= s.aura.radius) {
+              const d = Math.max(raw - o.def * dt, 0.05 * raw);
+              if (o.invT <= 0 && o.dodgeT <= 0) o.pend += d;
+            }
+          }
+          if (bd > s.aura.radius * 0.6) {
+            const mv = Math.min(e.ms * dt * opt.moveScale, bd);
+            if (bd > 1e-9) { e.pos += ((tg.pos - e.pos) / bd) * mv; e.y += ((tg.y - e.y) / bd) * mv; }
+          }
+          continue;
+        }
+
+        // One-off ranged opener (snowball, RPG)
+        if (e.opener && bd <= e.opener.range) {
+          const raw = curAtk(e) * e.opener.mult, cx = tg.pos, cy = tg.y;
+          let hits = 0;
+          for (let j = 0; j < N && hits < 5; j++) {
+            const o = E[j];
+            if (o.side === e.side || !isUp(o) || dist(o, cx, cy) > 1) continue;
+            strike(e, o, raw, e.opener.phys, 0); hits++;
+          }
+          e.opener = null;
+        }
+
+        if (bd > e.range) {
+          let sp = e.ms;
+          if (mech && s.charger && !off.charger && e.age > 5 && e.nAtk === 0) sp *= Math.min(11, 1 + (e.age - 5) * 3);
+          const mv = Math.min(sp * dt * opt.moveScale, bd);
+          if (bd > 1e-9) { e.pos += ((tg.pos - e.pos) / bd) * mv; e.y += ((tg.y - e.y) / bd) * mv; }
+          continue;
+        }
+        if (e.cd > 0) continue;
+
+        // --- attack ---------------------------------------------------------
+        if (mech && s.devourer && !off.devour) { tg.kill = true; e.cd = e.ai; e.nAtk++; continue; }
+        if (e.atk <= 0) continue;
+        e.cd = e.ai;
+        if (mech && s.devourFirst && !off.devour && !e.devoured) {
+          e.devoured = true; tg.kill = true; e.def += 700; e.ms *= 0.7; e.nAtk++;
+          continue;
+        }
+        let raw = curAtk(e);
+        if (e.ammo > 0) { raw *= e.ammoMult; e.ammo--; }
+        if (mech && s.charger && !off.charger && e.nAtk === 0 && e.age > 5) {
+          const mspd = e.ms * Math.min(11, 1 + (e.age - 5) * 3);
+          strike(e, tg, 1300 * mspd, 1, 0);
+        }
+        e.nAtk++;
+        let stun = 0, cold = 0;
+        if (mech && !off.stun) {
+          if (s.stunEvery && e.nAtk % (s.stunEvery.n + 1) === 0) stun = s.stunEvery.dur;
+          if (s.coldEvery && e.nAtk % (s.coldEvery.n + 1) === 0) cold = s.coldEvery.dur;
+        }
+        const splash = mech ? s.splash : 0;
+        const k = mech ? s.targets : 1;
+        let dealt = 0;
+        const land = (o) => {
+          for (let h = 0; h < e.hits; h++) dealt += strike(e, o, raw, e.phys, e.ignoreDef);
+          if (!mech) return;
+          if (stun) applyStun(o, stun);
+          if (cold) applyCold(o, cold);
+          if (s.shred && !off.shred) o.def = Math.max(0, o.def - s.shred);
+          if (s.burn && !off.burn) { o.burn += s.burn; if (o.burn >= 1000) { o.burn = 0; o.pend += 1200; } }
+          if (s.dot && !off.dot) { o.dotT = s.dot.dur; o.dotDps = Math.max(o.dotDps, s.dot.dps); }
+        };
+        if (splash > 0) {
+          const cx = tg.pos, cy = tg.y;
+          let hits = 0;
+          for (let j = 0; j < N && hits < 5; j++) {
+            const o = E[j];
+            if (o.side === e.side || !isUp(o) || dist(o, cx, cy) > splash) continue;
+            land(o); hits++;
+          }
+        } else if (k > 1) {
+          const cand = [];
+          for (let j = 0; j < N; j++) {
+            const o = E[j];
+            if (o.side === e.side || !isUp(o)) continue;
+            const dd = dist(e, o.pos, o.y);
+            if (dd <= e.range) cand.push({ o, dd });
+          }
+          cand.sort((a, b) => a.dd - b.dd);
+          for (let c = 0; c < Math.min(k, cand.length); c++) land(cand[c].o);
+        } else {
+          land(tg);
+        }
+        if (mech && s.lifesteal && !off.lifesteal) e.pend -= s.lifesteal * dealt;
+        if (mech && s.suicide && !off.suicide) e.kill = true;
+        if (e.imprisoned && e.nAtk >= 4) {
+          e.imprisoned = false; e.ai = s.ai; e.atk *= 1.5; e.ignoreDef = s.imprisoned.ignoreDef;
+          if (s.imprisoned.toArts) e.phys = 0;
+        }
+      }
+
+      // --- resolve damage and deaths (explosions can chain) -------------------
+      let guard = 0, again = true;
+      while (again && guard++ < 20) {
+        again = false;
+        const M = E.length;
+        for (let i = 0; i < M; i++) {
+          const e = E[i];
+          if (!isUp(e)) { e.pend = 0; e.kill = false; continue; }
+          if (e.kill && e.invT <= 0) e.hp = 0;
+          else if (e.pend !== 0) e.hp = Math.min(e.hp - e.pend, e.hp0);
+          e.pend = 0; e.kill = false;
+          const s = e.s;
+          if (mech && e.hp > 0 && e.hp < 0.5 * e.hp0) {
+            if (s.dodge && !off.dodge && !e.dodged) { e.dodged = true; e.dodgeT = s.dodge; }
+            if (s.split && !off.split && !e.splitDone) {
+              e.splitDone = true;
+              const c = spawn(e.u, e.side, e.pos, e.y, false);
+              c.hp = e.hp; c.splitDone = true; c.cd = e.ai;
+            }
+          }
+          if (e.hp > 0) continue;
+
+          // death
+          e.hp = 0;
+          if (!mech) continue;
+          if (s.deathExplode && !off.deathExplode) {
+            const x = s.deathExplode;
+            for (let j = 0; j < E.length; j++) {
+              const o = E[j];
+              if (o.side === e.side || !isUp(o) || dist(o, e.pos, e.y) > x.radius) continue;
+              strike(null, o, x.dmg, x.phys, 0);
+              if (x.stun) applyStun(o, x.stun);
+              if (x.cold) applyCold(o, x.cold);
+              again = true;
+            }
+          }
+          if (s.abduct && !off.abduct) {
+            let vt = null, vd = Infinity;
+            for (let j = 0; j < E.length; j++) {
+              const o = E[j];
+              if (o.side === e.side || !isUp(o) || o.kill) continue;
+              const dd = dist(o, e.pos, e.y);
+              if (dd < vd) { vd = dd; vt = o; }
+            }
+            if (vt) { vt.kill = true; again = true; }
+          }
+          if (s.spawnUnits && !off.spawn) for (const su of s.spawnUnits) spawn(su, e.side, e.pos, e.y, false);
+          if (s.revive && !off.revive && !e.revived) {
+            e.revived = true; e.reviveT = s.revive.delay; e.invT = s.revive.inv;
+            e.hp = e.hp0 * s.revive.frac;
+            e.stunT = 0; e.coldT = 0; e.dotT = 0; e.burn = 0;
+            const f = s.form2;
+            if (f) {
+              if (f.phys !== undefined) e.phys = f.phys;
+              if (f.range !== undefined) e.range = f.range;
+              if (f.atk) e.atk += f.atk;
+              if (f.atkMult) e.atk *= f.atkMult;
+              if (f.def) e.def += f.def;
+              if (f.ai) e.ai = Math.max(0.5, e.ai + f.ai);
+              if (f.ms) e.ms = f.ms;
+              if (f.hits) e.hits = f.hits;
+              if (s.resBonus) e.res -= s.resBonus;
+            }
+          }
+          for (let j = 0; j < E.length; j++) {
+            const o = E[j];
+            if (o.side === e.side && o !== e && o.s.enrage && !off.enrage && norm(o.s.enrage.partner) === norm(e.u.name)) o.enraged = true;
+            if (o.side === e.side && o !== e && o.s.avenger && !off.avenger && isUp(o)) o.avenge = Math.min(10, o.avenge + 1);
+          }
+        }
+      }
+    }
+
+    const rem = [0, 0];
+    for (const e of E) if (e.hp > 0) rem[e.side] += e.hp;
+    return Math.min(1, rem[0] / tot[0]) - Math.min(1, rem[1] / tot[1]);
+  }
+
+  const SIM_DIM = 4; // [mean margin, mean win sign, signed sqrt margin, margin without mechanics]
+
+  // Simulator results are shared between model instances that use the same
+  // enemies array (e.g. the folds of a cross-validation run).
+  const SIM_CACHES = new WeakMap();
+
+  const teamKey = (team) =>
+    Object.keys(team || {}).sort().map((k) => k + ':' + team[k]).join('|');
+
+  // ---------------------------------------------------------------------------
+  // Generic weighted, L2-regularised logistic regression (no intercept)
+  // ---------------------------------------------------------------------------
+  // rows: array of Float64Array. Minimises  sum_s sw_s * logloss_s + (l2 / 2) * |w|^2
+  function fitLogistic(rows, y, sw, l2, iters) {
+    const n = rows.length, d = n ? rows[0].length : 0;
+    const w = new Float64Array(d), mW = new Float64Array(d), vW = new Float64Array(d);
+    const grad = new Float64Array(d);
+    for (let it = 1; it <= iters; it++) {
+      grad.fill(0);
+      for (let s = 0; s < n; s++) {
+        const x = rows[s];
+        let z = 0;
+        for (let j = 0; j < d; j++) z += w[j] * x[j];
+        const err = sw[s] * (sigmoid(z) - y[s]);
+        for (let j = 0; j < d; j++) grad[j] += err * x[j];
+      }
+      const c1 = 1 - Math.pow(0.9, it), c2 = 1 - Math.pow(0.999, it);
+      const step = 0.1 / Math.sqrt(1 + it / 25); // decaying Adam step for a stable finish
+      for (let j = 0; j < d; j++) {
+        const g = grad[j] + l2 * w[j];
+        mW[j] = 0.9 * mW[j] + 0.1 * g;
+        vW[j] = 0.999 * vW[j] + 0.001 * g * g;
+        w[j] -= (step * (mW[j] / c1)) / (Math.sqrt(vW[j] / c2) + 1e-8);
+      }
+    }
+    return w;
+  }
+
+  function dot(w, x) {
+    let z = 0;
+    for (let j = 0; j < w.length; j++) z += w[j] * x[j];
+    return z;
+  }
+
+  // ---------------------------------------------------------------------------
   // Master Stacking Classifier Class
   // ---------------------------------------------------------------------------
   class DuelStackModel {
     constructor(options = {}) {
-      // XGBoost (gradient-boosted trees) settings
+      // Gradient-boosted trees
       this.xgbTrees = options.xgbTrees ?? 100;
       this.xgbDepth = options.xgbDepth ?? 3;
       this.xgbLr = options.xgbLr ?? 0.08;
@@ -246,26 +778,49 @@
       this.xgbMinChildWeight = options.xgbMinChildWeight ?? 1.0;
       this.xgbSubsample = options.xgbSubsample ?? 0.85;
       this.xgbColsample = options.xgbColsample ?? 0.85;
-      this.xgbStormWeight = options.xgbStormWeight ?? 0.75;
-      this.xgbEngineered = options.xgbEngineered ?? true; // give XGB the engineered matchup features too
-      // Neural net: smaller, shorter training, stronger L2, clipped inputs, seed-averaged
+
+      // Training weight of storm-flagged matches (all base models). 0 drops them.
+      this.stormWeight = options.stormWeight ?? options.xgbStormWeight ?? 0.75;
+
+      // Neural net: small, short training, L2 weight decay, clipped inputs, seed-averaged
       this.nnEpochs = options.nnEpochs ?? 30;
       this.nnHidden = options.nnHidden ?? [16, 8];
       this.nnLr = options.nnLr ?? 0.003;
       this.nnWd = options.nnWd ?? 0.01;
-      this.nnClip = options.nnClip ?? 5;       // clamp normalized inputs to +/- this many std devs
-      this.nnEnsemble = options.nnEnsemble ?? 3; // number of independently seeded nets averaged
-      this.folds = options.folds ?? 3;
+      this.nnClip = options.nnClip ?? 5;
+      this.nnEnsemble = options.nnEnsemble ?? 3;
+
+      // Wide logistic regression on all standardised features
+      this.wideL2 = options.wideL2 ?? 16.7;
+      this.wideIters = options.wideIters ?? 600;
+
+      // Simulator
+      this.simSeeds = Math.max(1, (options.simSeeds ?? 3) | 0);
+      this.simOpt = {
+        arenaLength: options.simArenaLength ?? 10,
+        arenaWidth: options.simArenaWidth ?? 4,
+        spawnSpread: options.simSpawnSpread ?? 3,
+        dt: options.simDt ?? 0.2,
+        maxTime: options.simMaxTime ?? 400,
+        moveScale: options.simMoveScale ?? 0.5,
+        disabled: options.simDisabled ?? {},
+      };
+
+      // Ensemble: equal-weight average of the wide model and the trees by default.
+      this.useNN = options.useNN ?? false;       // add the neural net as a third model
+      this.stacking = options.stacking ?? false; // fit ensemble weights on out-of-fold predictions
+      this.folds = options.folds ?? 3;           // folds used when stacking = true
       this.seed = options.seed ?? 42;
 
       this.enemies = [];
       this.enemyLookup = new Map();
-      this.weights = [0.333, 0.333, 0.333];
+      this.simCache = new Map();
+      this.weights = [0.5, 0, 0.5]; // [wide, nn, xgb]
     }
 
     _expandTeam(team) {
       const units = [];
-      for (const [name, count] of Object.entries(team)) {
+      for (const [name, count] of Object.entries(team || {})) {
         const found = this.enemyLookup.get(norm(name));
         if (found) {
           for (const u of found) units.push({ u, n: count });
@@ -274,196 +829,85 @@
       return units;
     }
 
-    _trainLR(matches, enemies) {
-      const n = matches.length, d = enemies.length;
-      const X = new Float64Array(n * d), y = new Float64Array(n), sw = new Float64Array(n);
-      for (let s = 0; s < n; s++) {
-        const m = matches[s];
-        y[s] = m.winner === 'A' ? 1 : 0;
-        sw[s] = m.storm === true ? 0.75 : 1.0;
-        for (let j = 0; j < d; j++) {
-          const e = enemies[j];
-          X[s * d + j] = Math.sqrt((m.teamA && m.teamA[e]) || 0) - Math.sqrt((m.teamB && m.teamB[e]) || 0);
-        }
-      }
+    // --- Features ------------------------------------------------------------
 
-      const w = new Float64Array(d), mW = new Float64Array(d), vW = new Float64Array(d);
-      for (let it = 1; it <= 500; it++) {
-        const grad = new Float64Array(d);
-        for (let s = 0; s < n; s++) {
-          let z = 0; const off = s * d;
-          for (let j = 0; j < d; j++) z += w[j] * X[off + j];
-          const err = (z > 20 ? 1 : z < -20 ? 0 : 1 / (1 + Math.exp(-z))) - y[s];
-          for (let j = 0; j < d; j++) grad[j] += sw[s] * err * X[off + j];
-        }
-        for (let j = 0; j < d; j++) {
-          grad[j] += 1.0 * w[j];
-          mW[j] = 0.9 * mW[j] + 0.1 * grad[j];
-          vW[j] = 0.999 * vW[j] + 0.001 * (grad[j] * grad[j]);
-          w[j] -= (0.1 * (mW[j] / (1 - Math.pow(0.9, it)))) / (Math.sqrt(vW[j] / (1 - Math.pow(0.999, it))) + 1e-8);
-        }
-      }
+    // Simulator features for (teamA vs teamB). The battle is always simulated in
+    // a canonical team order and the sign flipped if needed, so the features are
+    // exactly antisymmetric: sim(A, B) === -sim(B, A).
+    _simFeatures(tA, tB) {
+      const kA = teamKey(tA), kB = teamKey(tB);
+      const swap = kA > kB;
+      const o = this.simOpt;
+      const key = [JSON.stringify(o.disabled), this.simSeeds, o.arenaWidth, o.arenaLength, o.spawnSpread, o.dt, o.maxTime, o.moveScale,
+        swap ? kB : kA, swap ? kA : kB].join('#');
 
-      return {
-        predict: (tA, tB) => {
-          let z = 0;
-          for (let j = 0; j < d; j++) {
-            const e = enemies[j];
-            z += w[j] * (Math.sqrt(tA[e] || 0) - Math.sqrt(tB[e] || 0));
-          }
-          return sigmoid(z);
-        },
-      };
+      let f = this.simCache.get(key);
+      if (!f) {
+        const u1 = this._expandTeam(swap ? tB : tA), u2 = this._expandTeam(swap ? tA : tB);
+        const base = hashString(key);
+        let mg = 0, win = 0, mg0 = 0;
+        for (let s = 0; s < this.simSeeds; s++) {
+          const seed = (base + Math.imul(s + 1, 0x9e3779b1)) | 0;
+          const a = simulateBattle(u1, u2, o, seed, true);
+          const b = simulateBattle(u1, u2, o, seed, false);
+          mg += a; win += Math.sign(a); mg0 += b;
+        }
+        mg /= this.simSeeds; win /= this.simSeeds; mg0 /= this.simSeeds;
+        f = [mg, win, Math.sign(mg) * Math.sqrt(Math.abs(mg)), mg0];
+        this.simCache.set(key, f);
+      }
+      return swap ? f.map((v) => -v) : f;
     }
 
-    _trainXGB(matches, enemies, rng) {
-      const n = matches.length, nRaw = enemies.length, nTotal = 2 * n;
-      const lambda = this.xgbLambda, gamma = this.xgbGamma, minChild = this.xgbMinChildWeight;
-      const lr = this.xgbLr, maxDepth = this.xgbDepth;
-      const cnt = (team, e) => Number((team && team[e]) || 0) || 0;
-      const sig = (z) => (z > 20 ? 1 : z < -20 ? 0 : 1 / (1 + Math.exp(-z)));
-
-      // Optional engineered matchup features (antisymmetric), appended after the raw enemy columns
-      const engOf = (tA, tB) => pairDiffFeatures(this._expandTeam(tA), this._expandTeam(tB));
-      const engRows = this.xgbEngineered ? matches.map((m) => engOf(m.teamA, m.teamB)) : null;
-      const eDim = engRows ? engRows[0].length : 0;
-      const d = nRaw + eDim;
-
-      // Antisymmetric augmentation: every match appears as (A vs B) and (B vs A)
-      const X = new Float64Array(nTotal * d), y = new Float64Array(nTotal), sw = new Float64Array(nTotal);
-      for (let s = 0; s < n; s++) {
-        const m = matches[s];
-        const lbl = m.winner === 'A' ? 1 : 0;
-        const w = m.storm === true ? this.xgbStormWeight : 1.0;
-        y[s] = lbl; y[s + n] = 1 - lbl;
-        sw[s] = w; sw[s + n] = w;
-        for (let j = 0; j < nRaw; j++) {
-          const f = Math.sqrt(cnt(m.teamA, enemies[j])) - Math.sqrt(cnt(m.teamB, enemies[j]));
-          X[s * d + j] = f;
-          X[(s + n) * d + j] = -f;
-        }
-        for (let k = 0; k < eDim; k++) {
-          const f = engRows[s][k];
-          X[s * d + nRaw + k] = f;
-          X[(s + n) * d + nRaw + k] = -f;
-        }
-      }
-
-      const mtry = Math.max(1, Math.floor(d * this.xgbColsample));
-      const sampleSize = Math.max(1, Math.floor(n * this.xgbSubsample));
-      const score = (G, H) => (G * G) / (H + lambda);
-
-      const buildTree = (rows, g, h, depth) => {
-        let G = 0, H = 0;
-        for (let i = 0; i < rows.length; i++) { G += g[rows[i]]; H += h[rows[i]]; }
-        const leaf = { leaf: -(G / (H + lambda)) * lr };
-        if (depth >= maxDepth || rows.length <= 1 || H < minChild) return leaf;
-
-        // Column subsampling (partial Fisher-Yates)
-        const feats = new Int32Array(d);
-        for (let j = 0; j < d; j++) feats[j] = j;
-        const k = Math.min(mtry, d);
-        for (let j = 0; j < k; j++) {
-          const t = j + Math.floor(rng() * (d - j));
-          const tmp = feats[j]; feats[j] = feats[t]; feats[t] = tmp;
-        }
-
-        let bestGain = 0, bestF = -1, bestT = 0;
-        for (let fi = 0; fi < k; fi++) {
-          const f = feats[fi];
-          const sorted = rows.slice().sort((a, b) => X[a * d + f] - X[b * d + f]);
-          let GL = 0, HL = 0;
-          for (let i = 0; i < sorted.length - 1; i++) {
-            const r = sorted[i]; GL += g[r]; HL += h[r];
-            const v = X[r * d + f], vNext = X[sorted[i + 1] * d + f];
-            if (v === vNext) continue;
-            const GR = G - GL, HR = H - HL;
-            if (HL < minChild || HR < minChild) continue;
-            const gain = 0.5 * (score(GL, HL) + score(GR, HR) - score(G, H)) - gamma;
-            if (gain > bestGain) { bestGain = gain; bestF = f; bestT = (v + vNext) / 2; }
-          }
-        }
-        if (bestF < 0 || bestGain <= 0) return leaf;
-
-        const left = [], right = [];
-        for (let i = 0; i < rows.length; i++) {
-          const r = rows[i];
-          (X[r * d + bestF] <= bestT ? left : right).push(r);
-        }
-        return {
-          f: bestF, t: bestT,
-          l: buildTree(left, g, h, depth + 1),
-          r: buildTree(right, g, h, depth + 1),
-        };
-      };
-
-      const rowScore = (node, off) => {
-        while (node.leaf === undefined) node = X[off + node.f] <= node.t ? node.l : node.r;
-        return node.leaf;
-      };
-      const vecScore = (node, x) => {
-        while (node.leaf === undefined) node = x[node.f] <= node.t ? node.l : node.r;
-        return node.leaf;
-      };
-
-      const raw = new Float64Array(nTotal);
-      const g = new Float64Array(nTotal), h = new Float64Array(nTotal);
-      const trees = [];
-      for (let t = 0; t < this.xgbTrees; t++) {
-        for (let i = 0; i < nTotal; i++) {
-          const p = sig(raw[i]);
-          g[i] = (p - y[i]) * sw[i];
-          h[i] = Math.max(p * (1 - p) * sw[i], 1e-16);
-        }
-        // Row subsample (with replacement); both orientations of a match stay together
-        const rows = [];
-        for (let k = 0; k < sampleSize; k++) {
-          const idx = Math.floor(rng() * n);
-          rows.push(idx, idx + n);
-        }
-        const tree = buildTree(rows, g, h, 0);
-        trees.push(tree);
-        for (let i = 0; i < nTotal; i++) raw[i] += rowScore(tree, i * d);
-      }
-
-      const margin = (x) => {
-        let m = 0;
-        for (let i = 0; i < trees.length; i++) m += vecScore(trees[i], x);
-        return m;
-      };
-
-      return {
-        predict: (tA, tB) => {
-          const x = new Float64Array(d);
-          for (let j = 0; j < nRaw; j++) x[j] = Math.sqrt(cnt(tA, enemies[j])) - Math.sqrt(cnt(tB, enemies[j]));
-          if (eDim) { const e = engOf(tA, tB); for (let k = 0; k < eDim; k++) x[nRaw + k] = e[k]; }
-          const neg = x.map((v) => -v);
-          return 0.5 * (sig(margin(x)) + (1 - sig(margin(neg))));
-        },
-      };
+    // Full feature row: [sqrt-count diffs per enemy | engineered stat diffs | simulator]
+    _row(tA, tB) {
+      const enemies = this.enemies, nRaw = enemies.length;
+      const cnt = (team, e) => Math.max(Number((team && team[e]) || 0) || 0, 0);
+      const eng = pairDiffFeatures(this._expandTeam(tA), this._expandTeam(tB));
+      const sim = this._simFeatures(tA, tB);
+      const x = new Float64Array(nRaw + eng.length + SIM_DIM);
+      for (let j = 0; j < nRaw; j++) x[j] = Math.sqrt(cnt(tA, enemies[j])) - Math.sqrt(cnt(tB, enemies[j]));
+      for (let k = 0; k < eng.length; k++) x[nRaw + k] = eng[k];
+      for (let k = 0; k < SIM_DIM; k++) x[nRaw + eng.length + k] = sim[k];
+      return x;
     }
 
-    _trainNNOnce(matches, rng) {
-      const rawX = [], rawY = [];
-      for (const m of matches) {
-        const uA = this._expandTeam(m.teamA), uB = this._expandTeam(m.teamB);
-        rawX.push(buildNnFeatures(uA, uB, !!m.storm)); rawY.push(m.winner === 'A' ? 1 : 0);
-        rawX.push(buildNnFeatures(uB, uA, !!m.storm)); rawY.push(m.winner === 'A' ? 0 : 1);
+    // Row for the neural net: [team A stats | team B stats | time-to-kill terms | simulator]
+    // (no unit identities, no storm). Call with the teams swapped for the mirrored row.
+    _nnRow(tA, tB) {
+      const stat = buildNnStatFeatures(this._expandTeam(tA), this._expandTeam(tB));
+      const sim = this._simFeatures(tA, tB);
+      const x = new Float64Array(stat.length + SIM_DIM);
+      for (let k = 0; k < stat.length; k++) x[k] = stat[k];
+      for (let k = 0; k < SIM_DIM; k++) x[stat.length + k] = sim[k];
+      return x;
+    }
+
+    // --- Base models (each takes precomputed rows) ----------------------------
+
+    // fwd[s] is the (A vs B) row of match s, swp[s] the (B vs A) row.
+    _trainNNOnce(fwd, swp, y, sw, rng) {
+      const n = fwd.length, dim = fwd[0].length;
+      const rawX = [], Y = [], Wt = [];
+      for (let s = 0; s < n; s++) {
+        rawX.push(fwd[s]); Y.push(y[s]); Wt.push(sw[s]);
+        rawX.push(swp[s]); Y.push(1 - y[s]); Wt.push(sw[s]);
       }
-      const dim = rawX[0].length;
-      const mean = new Array(dim).fill(0), std = new Array(dim).fill(0);
+
+      const mean = new Float64Array(dim), std = new Float64Array(dim);
       for (const x of rawX) for (let j = 0; j < dim; j++) mean[j] += x[j] / rawX.length;
       for (const x of rawX) for (let j = 0; j < dim; j++) std[j] += (x[j] - mean[j]) ** 2 / rawX.length;
       for (let j = 0; j < dim; j++) std[j] = Math.sqrt(std[j]) || 1;
 
-      // Clamp z-scores: a rare flag has a tiny std, so one unusual unit would otherwise become a
-      // huge input and push the network into extreme, confidently-wrong outputs.
       const clip = this.nnClip;
-      const normVec = (v) => v.map((x, j) => clamp((x - mean[j]) / std[j], -clip, clip));
-      const X = rawX.map(normVec), Y = rawY;
+      const normVec = (v) => {
+        const out = new Float64Array(dim);
+        for (let j = 0; j < dim; j++) out[j] = clamp((v[j] - mean[j]) / std[j], -clip, clip);
+        return out;
+      };
+      const X = rawX.map(normVec);
 
-      const sizes = [dim, ...this.nnHidden, 1];
-      const net = new BrowserMLP(sizes, rng);
+      const net = new BrowserMLP([dim, ...this.nnHidden, 1], rng);
       const mW = net.W.map((w) => new Float64Array(w.length)), vW = net.W.map((w) => new Float64Array(w.length));
       const mB = net.b.map((cb) => new Float64Array(cb.length)), vB = net.b.map((cb) => new Float64Array(cb.length));
       const idx = X.map((_, i) => i);
@@ -475,7 +919,7 @@
           const batch = idx.slice(s, s + 32);
           const gW = net.W.map((w) => new Float64Array(w.length));
           const gb = net.b.map((cb) => new Float64Array(cb.length));
-          for (const i of batch) net.backward(X[i], Y[i], gW, gb);
+          for (const i of batch) net.backward(X[i], Y[i], Wt[i], gW, gb);
 
           step++;
           const c1 = 1 - Math.pow(0.9, step), c2 = 1 - Math.pow(0.999, step);
@@ -496,37 +940,154 @@
         }
       }
 
+      // Average the two orientations so swapping the teams gives exactly 1 - p
       return {
-        predict: (tA, tB, storm) => {
-          const uA = this._expandTeam(tA), uB = this._expandTeam(tB);
-          const fwd = normVec(buildNnFeatures(uA, uB, !!storm));
-          const swp = normVec(buildNnFeatures(uB, uA, !!storm));
-          return 0.5 * (net.predict(fwd) + (1 - net.predict(swp)));
-        },
+        predictPair: (f, w) => 0.5 * (net.predict(normVec(f)) + (1 - net.predict(normVec(w)))),
       };
     }
 
-    // Train several independently seeded nets and average their probabilities. This reduces the
-    // run-to-run variance that made single-net results swing a lot between folds.
-    _trainNN(matches, rng) {
+    _trainNN(fwd, swp, y, sw, rng) {
       const members = [];
       const k = Math.max(1, this.nnEnsemble | 0);
       for (let i = 0; i < k; i++) {
-        members.push(this._trainNNOnce(matches, mulberry32(Math.floor(rng() * 2147483647))));
+        members.push(this._trainNNOnce(fwd, swp, y, sw, mulberry32(Math.floor(rng() * 2147483647))));
       }
       return {
-        predict: (tA, tB, storm) => {
+        predictPair: (f, w) => {
           let sum = 0;
-          for (const mm of members) sum += mm.predict(tA, tB, storm);
+          for (const mm of members) sum += mm.predictPair(f, w);
           return sum / members.length;
         },
       };
     }
 
-    fit(matches, enemiesData) {
-      if (!matches || !matches.length) throw new Error("No matches provided");
+    _trainWide(rows, y, sw) {
+      const n = rows.length, d = rows[0].length;
+      // Features are antisymmetric, so their mean under A/B swapping is zero:
+      // scale by the root-mean-square only.
+      const scale = new Float64Array(d);
+      for (let s = 0; s < n; s++) for (let j = 0; j < d; j++) scale[j] += rows[s][j] * rows[s][j];
+      for (let j = 0; j < d; j++) scale[j] = Math.sqrt(scale[j] / n) || 1;
+      const scaled = rows.map((r) => {
+        const x = new Float64Array(d);
+        for (let j = 0; j < d; j++) x[j] = r[j] / scale[j];
+        return x;
+      });
+      const ws = fitLogistic(scaled, y, sw, this.wideL2, this.wideIters);
+      const w = new Float64Array(d);
+      for (let j = 0; j < d; j++) w[j] = ws[j] / scale[j];
+      return { predictRow: (x) => sigmoid(dot(w, x)) };
+    }
 
-      // Setup enemy lookup
+    _trainXGB(rows, yIn, swIn, rng) {
+      const n = rows.length, d = rows[0].length, nTotal = 2 * n;
+      const lambda = this.xgbLambda, gamma = this.xgbGamma, minChild = this.xgbMinChildWeight;
+      const lr = this.xgbLr, maxDepth = this.xgbDepth;
+
+      // Mirror-augmented design matrix: row s is (A vs B), row s + n is (B vs A)
+      const X = new Float64Array(nTotal * d), y = new Float64Array(nTotal), sw = new Float64Array(nTotal);
+      for (let s = 0; s < n; s++) {
+        y[s] = yIn[s]; y[s + n] = 1 - yIn[s];
+        sw[s] = swIn[s]; sw[s + n] = swIn[s];
+        const r = rows[s];
+        for (let j = 0; j < d; j++) {
+          X[s * d + j] = r[j];
+          X[(s + n) * d + j] = -r[j];
+        }
+      }
+
+      const mtry = Math.max(1, Math.floor(d * this.xgbColsample));
+      const sampleSize = Math.max(1, Math.floor(n * this.xgbSubsample));
+      const score = (G, H) => (G * G) / (H + lambda);
+
+      const buildTree = (nodeRows, g, h, depth) => {
+        let G = 0, H = 0;
+        for (let i = 0; i < nodeRows.length; i++) { G += g[nodeRows[i]]; H += h[nodeRows[i]]; }
+        const leaf = { leaf: -(G / (H + lambda)) * lr };
+        if (depth >= maxDepth || nodeRows.length <= 1 || H < minChild) return leaf;
+
+        const feats = new Int32Array(d);
+        for (let j = 0; j < d; j++) feats[j] = j;
+        const k = Math.min(mtry, d);
+        for (let j = 0; j < k; j++) {
+          const t = j + Math.floor(rng() * (d - j));
+          const tmp = feats[j]; feats[j] = feats[t]; feats[t] = tmp;
+        }
+
+        let bestGain = 0, bestF = -1, bestT = 0;
+        for (let fi = 0; fi < k; fi++) {
+          const f = feats[fi];
+          const sorted = nodeRows.slice().sort((a, b) => X[a * d + f] - X[b * d + f]);
+          let GL = 0, HL = 0;
+          for (let i = 0; i < sorted.length - 1; i++) {
+            const r = sorted[i]; GL += g[r]; HL += h[r];
+            const v = X[r * d + f], vNext = X[sorted[i + 1] * d + f];
+            if (v === vNext) continue;
+            const GR = G - GL, HR = H - HL;
+            if (HL < minChild || HR < minChild) continue;
+            const gain = 0.5 * (score(GL, HL) + score(GR, HR) - score(G, H)) - gamma;
+            if (gain > bestGain) { bestGain = gain; bestF = f; bestT = (v + vNext) / 2; }
+          }
+        }
+        if (bestF < 0 || bestGain <= 0) return leaf;
+
+        const left = [], right = [];
+        for (let i = 0; i < nodeRows.length; i++) {
+          const r = nodeRows[i];
+          (X[r * d + bestF] <= bestT ? left : right).push(r);
+        }
+        return {
+          f: bestF, t: bestT,
+          l: buildTree(left, g, h, depth + 1),
+          r: buildTree(right, g, h, depth + 1),
+        };
+      };
+
+      const rowScore = (node, off) => {
+        while (node.leaf === undefined) node = X[off + node.f] <= node.t ? node.l : node.r;
+        return node.leaf;
+      };
+      // sign = +1 scores x, sign = -1 scores the mirrored row (-x)
+      const vecScore = (node, x, sign) => {
+        while (node.leaf === undefined) node = sign * x[node.f] <= node.t ? node.l : node.r;
+        return node.leaf;
+      };
+
+      const raw = new Float64Array(nTotal);
+      const g = new Float64Array(nTotal), h = new Float64Array(nTotal);
+      const trees = [];
+      for (let t = 0; t < this.xgbTrees; t++) {
+        for (let i = 0; i < nTotal; i++) {
+          const p = sigmoid(raw[i]);
+          g[i] = (p - y[i]) * sw[i];
+          h[i] = Math.max(p * (1 - p) * sw[i], 1e-16);
+        }
+        const sample = [];
+        for (let k = 0; k < sampleSize; k++) {
+          const idx = Math.floor(rng() * n);
+          sample.push(idx, idx + n);
+        }
+        const tree = buildTree(sample, g, h, 0);
+        trees.push(tree);
+        for (let i = 0; i < nTotal; i++) raw[i] += rowScore(tree, i * d);
+      }
+
+      const margin = (x, sign) => {
+        let m = 0;
+        for (let i = 0; i < trees.length; i++) m += vecScore(trees[i], x, sign);
+        return m;
+      };
+
+      return {
+        predictRow: (x) => 0.5 * (sigmoid(margin(x, 1)) + (1 - sigmoid(margin(x, -1)))),
+      };
+    }
+
+    // --- Fit / predict -------------------------------------------------------
+
+    fit(matches, enemiesData) {
+      if (!matches || !matches.length) throw new Error('No matches provided');
+
       const lookup = new Map();
       const add = (k, u) => {
         if (!lookup.has(k)) lookup.set(k, []);
@@ -541,6 +1102,20 @@
         if (e.Group) add(norm(e.Group), unit);
       }
       this.enemyLookup = lookup;
+      // Resolve units that are spawned by other units when they die
+      for (const list of lookup.values()) {
+        for (const u of list) {
+          if (u.sim.spawnName && !u.sim.spawnUnits) u.sim.spawnUnits = lookup.get(norm(u.sim.spawnName)) || null;
+        }
+      }
+
+      // Share simulator results across models built from the same enemies array
+      if (enemiesData && typeof enemiesData === 'object') {
+        if (!SIM_CACHES.has(enemiesData)) SIM_CACHES.set(enemiesData, new Map());
+        this.simCache = SIM_CACHES.get(enemiesData);
+      } else {
+        this.simCache = new Map();
+      }
 
       const eSet = new Set();
       for (const m of matches) {
@@ -549,66 +1124,105 @@
       }
       this.enemies = Array.from(eSet).sort();
 
-      // K-Fold Cross Validation for Meta-Learner
-      const K = Math.min(this.folds, matches.length);
-      const oofLogits = [];
-      const oofTargets = [];
-
-      for (let f = 0; f < K; f++) {
-        const tr = matches.filter((_, i) => i % K !== f);
-        const te = matches.filter((_, i) => i % K === f);
-        const foldLR = this._trainLR(tr, this.enemies);
-        const foldXGB = this._trainXGB(tr, this.enemies, mulberry32(this.seed + f * 17 + 1));
-        const foldNN = this._trainNN(tr, mulberry32(this.seed + f * 31 + 1));
-
-        for (const m of te) {
-          const pNN = foldNN.predict(m.teamA, m.teamB, m.storm);
-          const pLR = foldLR.predict(m.teamA, m.teamB);
-          const pXGB = foldXGB.predict(m.teamA, m.teamB);
-          oofLogits.push([logit(pNN), logit(pLR), logit(pXGB)]);
-          oofTargets.push(m.winner === 'A' ? 1 : 0);
+      // Precompute every feature row once (the simulator runs here)
+      const n = matches.length;
+      const useNN = this.useNN;
+      const rows = new Array(n), nnFwd = new Array(n), nnSwp = new Array(n);
+      const y = new Float64Array(n), sw = new Float64Array(n);
+      for (let s = 0; s < n; s++) {
+        const m = matches[s];
+        rows[s] = this._row(m.teamA, m.teamB);
+        if (useNN) {
+          nnFwd[s] = this._nnRow(m.teamA, m.teamB);
+          nnSwp[s] = this._nnRow(m.teamB, m.teamA);
         }
+        y[s] = m.winner === 'A' ? 1 : 0;
+        sw[s] = m.storm === true ? this.stormWeight : 1.0;
       }
 
-      // Meta weights optimization
-      const w = new Float64Array([0.333, 0.333, 0.333]);
-      const mW = new Float64Array(3), vW = new Float64Array(3);
-      for (let it = 1; it <= 400; it++) {
-        const grad = new Float64Array(3);
-        for (let s = 0; s < oofLogits.length; s++) {
-          let z = w[0] * oofLogits[s][0] + w[1] * oofLogits[s][1] + w[2] * oofLogits[s][2];
-          const err = sigmoid(z) - oofTargets[s];
-          grad[0] += (err * oofLogits[s][0]) / oofLogits.length;
-          grad[1] += (err * oofLogits[s][1]) / oofLogits.length;
-          grad[2] += (err * oofLogits[s][2]) / oofLogits.length;
+      const trainAll = (idx, seedBase) => {
+        const pick = (arr) => idx.map((i) => arr[i]);
+        const yy = Float64Array.from(idx, (i) => y[i]);
+        const ww = Float64Array.from(idx, (i) => sw[i]);
+        return {
+          wide: this._trainWide(pick(rows), yy, ww),
+          nn: useNN ? this._trainNN(pick(nnFwd), pick(nnSwp), yy, ww, mulberry32(seedBase + 7919)) : null,
+          xgb: this._trainXGB(pick(rows), yy, ww, mulberry32(seedBase)),
+        };
+      };
+
+      // Ensemble weights, ordered [wide, nn, xgb]. Default: equal weights over the
+      // active models. With stacking = true they are fitted on out-of-fold predictions.
+      const active = [true, useNN, true];
+      const nActive = active.filter(Boolean).length;
+      const w = Float64Array.from(active, (a) => (a ? 1 / nActive : 0));
+      const K = Math.max(1, Math.min(this.folds, n));
+      if (this.stacking && K >= 2) {
+        const oofLogits = [], oofTargets = [];
+        for (let f = 0; f < K; f++) {
+          const tr = [], te = [];
+          for (let i = 0; i < n; i++) (i % K === f ? te : tr).push(i);
+          const fold = trainAll(tr, this.seed + f * 17 + 1);
+          for (const i of te) {
+            oofLogits.push([
+              logit(fold.wide.predictRow(rows[i])),
+              useNN ? logit(fold.nn.predictPair(nnFwd[i], nnSwp[i])) : 0,
+              logit(fold.xgb.predictRow(rows[i])),
+            ]);
+            oofTargets.push(y[i]);
+          }
         }
-        for (let j = 0; j < 3; j++) {
-          grad[j] += 0.001 * w[j];
-          mW[j] = 0.9 * mW[j] + 0.1 * grad[j];
-          vW[j] = 0.999 * vW[j] + 0.001 * grad[j] * grad[j];
-          w[j] -= (0.05 * (mW[j] / (1 - Math.pow(0.9, it)))) / (Math.sqrt(vW[j] / (1 - Math.pow(0.999, it))) + 1e-8);
+        const mW = new Float64Array(3), vW = new Float64Array(3);
+        for (let it = 1; it <= 400; it++) {
+          const grad = new Float64Array(3);
+          for (let s = 0; s < oofLogits.length; s++) {
+            const o = oofLogits[s];
+            const err = sigmoid(w[0] * o[0] + w[1] * o[1] + w[2] * o[2]) - oofTargets[s];
+            for (let j = 0; j < 3; j++) grad[j] += (err * o[j]) / oofLogits.length;
+          }
+          for (let j = 0; j < 3; j++) {
+            if (!active[j]) continue;
+            grad[j] += 0.001 * w[j];
+            mW[j] = 0.9 * mW[j] + 0.1 * grad[j];
+            vW[j] = 0.999 * vW[j] + 0.001 * grad[j] * grad[j];
+            w[j] -= (0.05 * (mW[j] / (1 - Math.pow(0.9, it)))) / (Math.sqrt(vW[j] / (1 - Math.pow(0.999, it))) + 1e-8);
+          }
         }
       }
       this.weights = Array.from(w);
 
-      // Final base models trained on full dataset
-      this.modelLR = this._trainLR(matches, this.enemies);
-      this.modelXGB = this._trainXGB(matches, this.enemies, mulberry32(this.seed + 999));
-      this.modelNN = this._trainNN(matches, mulberry32(this.seed + 888));
+      // Final base models on all the data
+      const all = [];
+      for (let i = 0; i < n; i++) all.push(i);
+      const full = trainAll(all, this.seed + 999);
+      this.modelWide = full.wide;
+      this.modelNN = full.nn;
+      this.modelXGB = full.xgb;
+      return this;
     }
 
-    predictDetailed(teamA, teamB, storm = false) {
-      const pNN = this.modelNN.predict(teamA, teamB, storm);
-      const pLR = this.modelLR.predict(teamA, teamB);
-      const pXGB = this.modelXGB.predict(teamA, teamB);
+    // `storm` is accepted for backward compatibility and ignored.
+    predictDetailed(teamA, teamB, storm = false) { // eslint-disable-line no-unused-vars
+      if (!this.modelWide) throw new Error('Model has not been fitted');
+      const row = this._row(teamA, teamB);
+      const pWide = this.modelWide.predictRow(row);
+      const pNN = this.modelNN
+        ? this.modelNN.predictPair(this._nnRow(teamA, teamB), this._nnRow(teamB, teamA))
+        : null;
+      const pXGB = this.modelXGB.predictRow(row);
+      const sim = this._simFeatures(teamA, teamB);
 
-      const z = this.weights[0] * logit(pNN) + this.weights[1] * logit(pLR) + this.weights[2] * logit(pXGB);
+      let z = this.weights[0] * logit(pWide) + this.weights[2] * logit(pXGB);
+      if (pNN !== null) z += this.weights[1] * logit(pNN);
       return {
         p: sigmoid(z),
-        nn: pNN,
-        lr: pLR,
+        wide: pWide,
+        nn: pNN,           // null unless the model was built with { useNN: true }
         xgb: pXGB,
-        rf: pXGB, // legacy alias so existing UI code reading `.rf` keeps working
+        simMargin: sim[0], // > 0 means the simulator favours team A
+        simWinRate: (sim[1] + 1) / 2, // share of simulated battles won by team A
+        lr: pWide,         // legacy alias (the wide model is the stack's logistic regression)
+        rf: pXGB,          // legacy alias
         weights: this.weights,
       };
     }
@@ -618,7 +1232,20 @@
     }
   }
 
-  // Mount to browser global scope
-  global.DuelStackModel = DuelStackModel;
-  global.EnemyStrengthModel = DuelStackModel;
-})(typeof window !== 'undefined' ? window : this);
+  DuelStackModel.simulateBattle = simulateBattle;
+
+  // Universal export: supports browser window, Node.js module.exports, and global
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = DuelStackModel;
+    module.exports.DuelStackModel = DuelStackModel;
+    module.exports.EnemyStrengthModel = DuelStackModel;
+  }
+  if (typeof global !== 'undefined') {
+    global.DuelStackModel = DuelStackModel;
+    global.EnemyStrengthModel = DuelStackModel;
+  }
+  if (typeof window !== 'undefined') {
+    window.DuelStackModel = DuelStackModel;
+    window.EnemyStrengthModel = DuelStackModel;
+  }
+})(typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : this));

@@ -22,6 +22,10 @@
   const statusEl = $('status');
   const resultsEl = $('results');
   const outputEl = $('predictionOutput');
+  const detailEl = $('predictionDetail');
+  const infoToggle = $('infoToggle');
+  const debugToggle = $('debugToggle');
+  const debugPanel = $('debugPanel');
   const previewEl = $('preview');
   const lists = { A: $('teamAList'), B: $('teamBList') };
 
@@ -29,10 +33,29 @@
   let enemyNames = [];   // names offered in the dropdowns and given to detect.js
   let lastImage = null;  // last pasted / chosen screenshot, for Re-detect
   let detectRun = 0;     // guards against overlapping detections
+  let infoOpen = false;  // whether "Advanced Info" is expanded
 
   const setStatus = (text, isError) => {
     statusEl.textContent = text;
     statusEl.style.color = isError ? '#b00020' : '';
+  };
+
+  // Shows a plain message (or nothing) in the result area and hides the details
+  const showMessage = (text) => {
+    outputEl.textContent = text || '';
+    detailEl.textContent = '';
+    detailEl.style.display = 'none';
+    infoToggle.style.display = 'none';
+  };
+
+  // Makes `button` show / hide `panel`; the panel starts hidden
+  const makeToggle = (button, panel) => {
+    const set = (open) => {
+      panel.style.display = open ? '' : 'none';
+      button.setAttribute('aria-expanded', String(open));
+    };
+    button.addEventListener('click', () => set(panel.style.display === 'none'));
+    return set;
   };
 
   const fetchJson = async (url) => {
@@ -59,8 +82,8 @@
       model = DuelStackModel.fromJSON(saved, enemies);
     } else {
       const matches = (await fetchJson(MATCHES_URL)).filter((m) => m.winner === 'A' || m.winner === 'B');
-      setStatus(`No stack.json found. Training on ${matches.length} matches in the browser; ` +
-        'the page will freeze for a minute or more…');
+      setStatus(`Training on ${matches.length} matches in the browser; ` +
+        'page may freeze for a minute or more…');
       await new Promise((resolve) => setTimeout(resolve, 50)); // let the message paint first
       console.time('fit');
       model = new DuelStackModel();
@@ -81,7 +104,7 @@
     resultsEl.style.display = '';
     if (!lists.A.children.length) addRow('A');
     if (!lists.B.children.length) addRow('B');
-    setStatus(`Model ready (${enemyNames.length} enemy types). Paste a screenshot or enter the teams below.`);
+    setStatus(`Model ready. Paste a screenshot or enter the teams below.`);
 
     if (typeof warmUp === 'function') warmUp(enemyNames); // preload sprites and the OCR worker
   }
@@ -118,10 +141,10 @@
     remove.type = 'button';
     remove.textContent = '×';
     remove.title = 'Remove';
-    remove.addEventListener('click', () => { row.remove(); outputEl.textContent = ''; });
+    remove.addEventListener('click', () => { row.remove(); showMessage(''); });
 
     for (const el of [nameInput, countInput]) {
-      el.addEventListener('input', () => { outputEl.textContent = ''; });
+      el.addEventListener('input', () => { showMessage(''); });
       el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') predict(); });
     }
 
@@ -157,15 +180,15 @@
   // Prediction
   // --------------------------------------------------------------------------
   function predict() {
-    if (!model) { outputEl.textContent = 'The model is still loading.'; return; }
+    if (!model) { showMessage('The model is still loading.'); return; }
     const a = readTeam('A'), b = readTeam('B');
     const unknown = a.unknown.concat(b.unknown);
     if (unknown.length) {
-      outputEl.textContent = 'Unknown enemy: ' + unknown.join(', ') + '. Pick names from the list.';
+      showMessage('Unknown enemy: ' + unknown.join(', ') + '. Pick names from the list.');
       return;
     }
     if (!Object.keys(a.team).length || !Object.keys(b.team).length) {
-      outputEl.textContent = 'Enter at least one enemy on each side.';
+      showMessage('Enter at least one enemy on each side.');
       return;
     }
 
@@ -177,15 +200,13 @@
     const conf = Math.round(100 * (aWins ? d.p : 1 - d.p));
     const pct = (v) => Math.round(100 * v) + '%';
 
-    outputEl.textContent = '';
-    const headline = document.createElement('div');
-    headline.textContent = `${aWins ? 'Team A (left)' : 'Team B (right)'} wins: ${conf}%`;
-    const detail = document.createElement('small');
-    detail.style.fontWeight = 'normal';
-    detail.textContent =
-      `Chance team A wins: ${pct(d.p)} (linear model ${pct(d.wide)}, trees ${pct(d.xgb)}, ` +
-      `simulator ${pct(d.simWinRate)} of battles) · ${ms} ms`;
-    outputEl.append(headline, detail);
+    outputEl.textContent = `${aWins ? 'Team A (left)' : 'Team B (right)'} wins: ${conf}%`;
+    // Details stay behind the "Advanced Info" button; it keeps its open/closed state
+    detailEl.textContent =
+      `Chance team A wins: ${pct(d.p)}. Linear model ${pct(d.wide)}, trees ${pct(d.xgb)}, ` +
+      `simulator: team A won ${pct(d.simWinRate)} of simulated battles. Computed in ${ms} ms.`;
+    infoToggle.style.display = '';
+    detailEl.style.display = infoOpen ? '' : 'none';
   }
 
   // --------------------------------------------------------------------------
@@ -217,7 +238,7 @@
     try {
       await modelReady;
       setStatus('Reading the screenshot…');
-      outputEl.textContent = '';
+      showMessage('');
       const found = await detectEnemies(lastImage, {}, enemyNames);
       if (run !== detectRun) return; // a newer screenshot replaced this one
 
@@ -231,7 +252,7 @@
           'Check the names and counts, then Predict again if you change anything.');
         predict();
       } else {
-        setStatus('Could not find enemies on both sides. Check the overlay, or enter the teams by hand.', true);
+        setStatus('Could not find enemies on both sides. Enter the teams by hand, or open Advanced debug to see what was detected.', true);
       }
     } catch (err) {
       if (run !== detectRun) return;
@@ -278,9 +299,16 @@
     if (file && file.type.startsWith('image/')) handleImageBlob(file);
   });
 
+  makeToggle(debugToggle, debugPanel);
+  infoToggle.addEventListener('click', () => {
+    infoOpen = !infoOpen;
+    detailEl.style.display = infoOpen ? '' : 'none';
+    infoToggle.setAttribute('aria-expanded', String(infoOpen));
+  });
+
   $('redetect').addEventListener('click', runDetection);
   $('predictBtn').addEventListener('click', predict);
   for (const btn of document.querySelectorAll('.addRow')) {
-    btn.addEventListener('click', () => { addRow(btn.dataset.side); outputEl.textContent = ''; });
+    btn.addEventListener('click', () => { addRow(btn.dataset.side); showMessage(''); });
   }
 })();

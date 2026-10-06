@@ -7,13 +7,15 @@
 </head>
 <body>
   <h1>Duel Channel Predictor</h1>
-  <p id="status">Loading and training model on <span id="matchCount">…</span> matches…</p>
+  <p id="status">Loading model…</p>
 
   <section id="paste-area" tabindex="0">
     Paste a screenshot here (Ctrl/Cmd+V), or
     <input type="file" id="fileInput" accept="image/*" />
   </section>
 
+  <button id="debugToggle" type="button" aria-expanded="false">Advanced debug</button>
+  <div id="debugPanel" style="display:none">
   <canvas id="preview" style="display:none"></canvas>
 
   <section id="regionControls">
@@ -23,9 +25,10 @@
     <label>Icon size: <input id="iconSize" type="number" value="5.5" step="0.5" size="3">% of image width &nbsp; Match threshold: <input id="threshold" type="number" value="0.85" step="0.01" size="4"></label>
     <button id="redetect">Re-detect</button>
   </section>
+  </div>
 
   <section id="results" style="display:none">
-    <h2>Detected teams (edit names/counts if wrong, then Predict)</h2>
+    <h2>Detected teams (edit teams if necessary)</h2>
     <div class="teams">
       <div>
         <h3>Team A (left)</h3>
@@ -40,6 +43,8 @@
     </div>
     <button id="predictBtn">Predict</button>
     <h2 id="predictionOutput"></h2>
+    <button id="infoToggle" type="button" aria-expanded="false" style="display:none">Advanced Info</button>
+    <p id="predictionDetail" style="display:none"></p>
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>

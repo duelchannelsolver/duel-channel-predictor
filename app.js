@@ -104,7 +104,7 @@
     resultsEl.style.display = '';
     if (!lists.A.children.length) addRow('A');
     if (!lists.B.children.length) addRow('B');
-    setStatus(`Model ready. Paste a screenshot or enter the teams below.`);
+    setStatus(`Model ready. Paste a screenshot of the entire game screen (may not work with ultrawide resolutions) or enter the teams below.`);
 
     if (typeof warmUp === 'function') warmUp(enemyNames); // preload sprites and the OCR worker
   }

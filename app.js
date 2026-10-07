@@ -15,8 +15,8 @@
   'use strict';
 
   const MODEL_URL = 'stack.json';
-  const ENEMIES_URL = 'duel_channel_enemies.json';
-  const MATCHES_URL = 'matches.json'; // only used by the fallback
+  const ENEMIES_URL = 'data/duel_channel_enemies.json';
+  const MATCHES_URL = 'data/matches.json'; // only used by the fallback
 
   const $ = (id) => document.getElementById(id);
   const statusEl = $('status');

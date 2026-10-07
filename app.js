@@ -4,19 +4,19 @@
  * Needs, next to index.html:
  *   stack.js                   the model code (defines DuelStackModel)
  *   detect.js                  screenshot detection (defines detectEnemies, warmUp)
- *   model.json                 trained model, made with `node train.js`
+ *   stack.json                 trained model, made with `node train.js`
  *   duel_channel_enemies.json  the enemies file the model was trained with
  *   sprites/<name>.png         enemy icons used by detect.js
  *
- * If model.json is missing, the page falls back to training in the browser
+ * If stack.json is missing, the page falls back to training in the browser
  * from matches.json, which is slow.
  */
 (function () {
   'use strict';
 
   const MODEL_URL = 'stack.json';
-  const ENEMIES_URL = 'data/duel_channel_enemies.json';
-  const MATCHES_URL = 'data/matches.json'; // only used by the fallback
+  const ENEMIES_URL = 'duel_channel_enemies.json';
+  const MATCHES_URL = 'matches.json'; // only used by the fallback
 
   const $ = (id) => document.getElementById(id);
   const statusEl = $('status');
@@ -82,8 +82,8 @@
       model = DuelStackModel.fromJSON(saved, enemies);
     } else {
       const matches = (await fetchJson(MATCHES_URL)).filter((m) => m.winner === 'A' || m.winner === 'B');
-      setStatus(`Training on ${matches.length} matches in the browser; ` +
-        'page may freeze for a minute or more…');
+      setStatus(`Training on ${matches.length} matches; ` +
+        'the page may freeze for a minute or more…');
       await new Promise((resolve) => setTimeout(resolve, 50)); // let the message paint first
       console.time('fit');
       model = new DuelStackModel();
@@ -104,7 +104,7 @@
     resultsEl.style.display = '';
     if (!lists.A.children.length) addRow('A');
     if (!lists.B.children.length) addRow('B');
-    setStatus(`Model ready. Paste a screenshot of the entire game screen (may not work with ultrawide resolutions) or enter the teams below.`);
+    setStatus(`Model ready. Paste a screenshot or enter the teams below.`);
 
     if (typeof warmUp === 'function') warmUp(enemyNames); // preload sprites and the OCR worker
   }
@@ -180,16 +180,16 @@
   // Prediction
   // --------------------------------------------------------------------------
   function predict() {
-    if (!model) { showMessage('The model is still loading.'); return; }
+    if (!model) { showMessage('The model is still loading.'); return null; }
     const a = readTeam('A'), b = readTeam('B');
     const unknown = a.unknown.concat(b.unknown);
     if (unknown.length) {
       showMessage('Unknown enemy: ' + unknown.join(', ') + '. Pick names from the list.');
-      return;
+      return null;
     }
     if (!Object.keys(a.team).length || !Object.keys(b.team).length) {
       showMessage('Enter at least one enemy on each side.');
-      return;
+      return null;
     }
 
     const t0 = performance.now();
@@ -207,6 +207,69 @@
       `simulator: team A won ${pct(d.simWinRate)} of simulated battles. Computed in ${ms} ms.`;
     infoToggle.style.display = '';
     detailEl.style.display = infoOpen ? '' : 'none';
+    return { teamA: a.team, teamB: b.team, p: d.p };
+  }
+
+  // --------------------------------------------------------------------------
+  // Copy to Excel
+  // --------------------------------------------------------------------------
+  const COPY_HEADERS = [
+    'Left Enemy 1', '# of Enemy 1', 'Left Enemy 2', '# of Enemy 2', 'Left Enemy 3', '# of Enemy 3',
+    'Right Enemy A', '# of Enemy A', 'Right Enemy B', '# of Enemy B', 'Right Enemy C', '# of Enemy C',
+    'Winner (L/R)', 'Predicted Winner (L/R)', 'Win Probability',
+  ];
+  const SLOTS = 3; // enemy types per side in the sheet
+
+  async function writeClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); return; } catch (err) { /* fall back below */ }
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (!ok) throw new Error('The browser blocked copying');
+  }
+
+  // Copies one tab-separated row (current teams + prediction) for pasting into the sheet.
+  // "Winner (L/R)" is left blank to fill in after the match.
+  async function copyToExcel() {
+    const res = predict(); // always copy what is on screen right now
+    if (!res) return;
+    const clean = (v) => String(v).replace(/[\t\r\n]+/g, ' ');
+    const side = (team) => {
+      const cells = [];
+      const names = Object.keys(team);
+      for (let i = 0; i < SLOTS; i++) {
+        if (i < names.length) cells.push(clean(names[i]), team[names[i]]);
+        else cells.push('', '');
+      }
+      return cells;
+    };
+    const leftWins = res.p >= 0.5;
+    const prob = leftWins ? res.p : 1 - res.p;
+    const row = [
+      ...side(res.teamA), ...side(res.teamB),
+      '', leftWins ? 'L' : 'R', (100 * prob).toFixed(1) + '%',
+    ];
+    const lines = [];
+    if ($('copyHeaders').checked) lines.push(COPY_HEADERS.join('\t'));
+    lines.push(row.join('\t'));
+
+    const btn = $('copyBtn');
+    const tooMany = Object.keys(res.teamA).length > SLOTS || Object.keys(res.teamB).length > SLOTS;
+    try {
+      await writeClipboard(lines.join('\n'));
+      btn.textContent = tooMany ? 'Copied (first 3 per side)' : 'Copied!';
+    } catch (err) {
+      console.error(err);
+      btn.textContent = 'Copy failed';
+    }
+    setTimeout(() => { btn.textContent = 'Copy to Excel'; }, 1800);
   }
 
   // --------------------------------------------------------------------------
@@ -308,6 +371,7 @@
 
   $('redetect').addEventListener('click', runDetection);
   $('predictBtn').addEventListener('click', predict);
+  $('copyBtn').addEventListener('click', copyToExcel);
   for (const btn of document.querySelectorAll('.addRow')) {
     btn.addEventListener('click', () => { addRow(btn.dataset.side); showMessage(''); });
   }

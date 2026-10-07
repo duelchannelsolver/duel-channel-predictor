@@ -4,17 +4,17 @@
  * Needs, next to index.html:
  *   stack.js                   the model code (defines DuelStackModel)
  *   detect.js                  screenshot detection (defines detectEnemies, warmUp)
- *   stack.json                 trained model, made with `node train.js`
+ *   model.json                 trained model, made with `node train.js`
  *   duel_channel_enemies.json  the enemies file the model was trained with
  *   sprites/<name>.png         enemy icons used by detect.js
  *
- * If stack.json is missing, the page falls back to training in the browser
+ * If model.json is missing, the page falls back to training in the browser
  * from matches.json, which is slow.
  */
 (function () {
   'use strict';
 
-  const MODEL_URL = 'stack.json';
+  const MODEL_URL = 'model.json';
   const ENEMIES_URL = 'data/duel_channel_enemies.json';
   const MATCHES_URL = 'data/matches.json'; // only used by the fallback
 
@@ -32,7 +32,6 @@
   let model = null;
   let enemyNames = [];   // names offered in the dropdowns and given to detect.js
   let lastImage = null;  // last pasted / chosen screenshot, for Re-detect
-  let detectRun = 0;     // guards against overlapping detections
   let infoOpen = false;  // whether "Advanced Info" is expanded
 
   const setStatus = (text, isError) => {
@@ -75,15 +74,15 @@
     try {
       saved = await fetchJson(MODEL_URL);
     } catch (err) {
-      console.warn('No trained model found (' + err.message + '); training in the browser instead.');
+      console.warn('No pretrained model found (' + err.message + '); training in the browser instead.');
     }
 
     if (saved) {
       model = DuelStackModel.fromJSON(saved, enemies);
     } else {
       const matches = (await fetchJson(MATCHES_URL)).filter((m) => m.winner === 'A' || m.winner === 'B');
-      setStatus(`Training on ${matches.length} matches; ` +
-        'the page may freeze for a minute or more…');
+      setStatus(`No pretrained model found. Training on ${matches.length} matches in the browser; ` +
+        'the page may freeze for a minute');
       await new Promise((resolve) => setTimeout(resolve, 50)); // let the message paint first
       console.time('fit');
       model = new DuelStackModel();
@@ -104,9 +103,15 @@
     resultsEl.style.display = '';
     if (!lists.A.children.length) addRow('A');
     if (!lists.B.children.length) addRow('B');
-    setStatus(`Model ready. Paste a screenshot or enter the teams below.`);
+    if (model.outdated) {
+      setStatus('model.json was trained with an older stack.js, so predictions may be wrong. ' +
+        'Re-run train.js and upload the new model.json.', true);
+    } else {
+      setStatus(`Model ready. Paste a screenshot or enter the teams below.`);
+    }
 
     if (typeof warmUp === 'function') warmUp(enemyNames); // preload sprites and the OCR worker
+    resetOcrIfBroken(); // if the text reader failed to start, let it retry later
   }
 
   const modelReady = loadModel().catch((err) => {
@@ -203,8 +208,8 @@
     outputEl.textContent = `${aWins ? 'Team A (left)' : 'Team B (right)'} wins: ${conf}%`;
     // Details stay behind the "Advanced Info" button; it keeps its open/closed state
     detailEl.textContent =
-      `Chance team A wins: ${pct(d.p)}. Linear model ${pct(d.wide)}, trees ${pct(d.xgb)}, ` +
-      `simulator: team A won ${pct(d.simWinRate)} of simulated battles. Computed in ${ms} ms.`;
+      `Chance left team wins: ${pct(d.p)}. Linear model ${pct(d.wide)}, trees ${pct(d.xgb)}, ` +
+      `simulator: left team won ${pct(d.simWinRate)} of simulated battles. Computed in ${ms} ms.`;
     infoToggle.style.display = '';
     detailEl.style.display = infoOpen ? '' : 'none';
     return { teamA: a.team, teamB: b.team, p: d.p };
@@ -213,11 +218,6 @@
   // --------------------------------------------------------------------------
   // Copy to Excel
   // --------------------------------------------------------------------------
-  const COPY_HEADERS = [
-    'Left Enemy 1', '# of Enemy 1', 'Left Enemy 2', '# of Enemy 2', 'Left Enemy 3', '# of Enemy 3',
-    'Right Enemy A', '# of Enemy A', 'Right Enemy B', '# of Enemy B', 'Right Enemy C', '# of Enemy C',
-    'Winner (L/R)', 'Predicted Winner (L/R)', 'Win Probability',
-  ];
   const SLOTS = 3; // enemy types per side in the sheet
 
   async function writeClipboard(text) {
@@ -257,7 +257,6 @@
       '', leftWins ? 'L' : 'R', (100 * prob).toFixed(1) + '%',
     ];
     const lines = [];
-    if ($('copyHeaders').checked) lines.push(COPY_HEADERS.join('\t'));
     lines.push(row.join('\t'));
 
     const btn = $('copyBtn');
@@ -285,53 +284,225 @@
     previewEl.style.height = 'auto';
   }
 
-  function loadImageFromBlob(blob) {
+  let lastImageUrl = null;
+  const isBlob = (b) => typeof Blob !== 'undefined' && b instanceof Blob;
+
+  function imageFromUrl(url, crossOrigin) {
     return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(blob);
       const img = new Image();
-      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image')); };
+      if (crossOrigin) img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('The browser could not decode that image'));
       img.src = url;
     });
   }
 
-  async function runDetection() {
-    if (!lastImage) { setStatus('Paste or choose a screenshot first.'); return; }
-    const run = ++detectRun;
+  // Blob -> <img>. If the browser's <img> decoder rejects it, re-encode it
+  // through createImageBitmap + canvas and try again.
+  async function loadImageFromBlob(blob) {
+    if (!isBlob(blob)) throw new Error('The clipboard did not hand over an image');
+    if (blob.size === 0) throw new Error('The copied image was empty');
+    let url = URL.createObjectURL(blob);
+    let img;
     try {
-      await modelReady;
-      setStatus('Reading the screenshot…');
-      showMessage('');
-      const found = await detectEnemies(lastImage, {}, enemyNames);
-      if (run !== detectRun) return; // a newer screenshot replaced this one
-
-      if (found.debugCanvas) showPreview(found.debugCanvas);
-      setTeam('A', found.left);
-      setTeam('B', found.right);
-      resultsEl.style.display = '';
-
-      if (found.left.length && found.right.length) {
-        setStatus(`Found ${found.left.length} enemy type(s) on the left and ${found.right.length} on the right. ` +
-          'Check the names and counts, then Predict again if you change anything.');
-        predict();
-      } else {
-        setStatus('Could not find enemies on both sides. Enter the teams by hand, or open Advanced debug to see what was detected.', true);
-      }
+      img = await imageFromUrl(url);
     } catch (err) {
-      if (run !== detectRun) return;
-      console.error(err);
-      setStatus('Detection failed: ' + err.message, true);
+      URL.revokeObjectURL(url);
+      if (typeof createImageBitmap !== 'function') throw err;
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement('canvas');
+      c.width = bmp.width; c.height = bmp.height;
+      c.getContext('2d').drawImage(bmp, 0, 0);
+      const png = await new Promise((resolve) => c.toBlob(resolve, 'image/png'));
+      if (!png) throw err;
+      url = URL.createObjectURL(png);
+      img = await imageFromUrl(url);
+    }
+    // Keep this image's data alive while it is in use; release the previous one
+    if (lastImageUrl) URL.revokeObjectURL(lastImageUrl);
+    lastImageUrl = url;
+    return img;
+  }
+
+  // Everything in a paste / drop that might be an image, best candidates first.
+  // Must be called synchronously inside the event handler.
+  function imageCandidates(dt) {
+    const blobs = [], urls = [];
+    if (!dt) return { blobs, urls };
+    const seen = new Set();
+    const addBlob = (f) => {
+      if (!isBlob(f) || f.size === 0) return;
+      if (f.type && !f.type.startsWith('image/')) return;
+      const key = f.type + ':' + f.size;
+      if (seen.has(key)) return;
+      seen.add(key);
+      blobs.push(f);
+    };
+    for (const f of Array.from(dt.files || [])) addBlob(f);
+    for (const item of Array.from(dt.items || [])) {
+      if (item.kind === 'file' && (!item.type || item.type.startsWith('image/'))) addBlob(item.getAsFile());
+    }
+    // PNG first: it is what screenshots are, and every browser decodes it
+    blobs.sort((x, y) => (y.type === 'image/png') - (x.type === 'image/png'));
+    // Images copied from a web page or chat app often arrive only as HTML
+    let html = '';
+    try { html = dt.getData('text/html') || ''; } catch (err) { /* not available */ }
+    const m = /<img[^>]+src\s*=\s*["']([^"']+)["']/i.exec(html);
+    if (m) urls.push(m[1].replace(/&amp;/g, '&'));
+    return { blobs, urls };
+  }
+
+  // Last resort for pastes where the event carried no usable image (the
+  // clipboard was not ready yet): ask the clipboard directly, twice.
+  async function readClipboardImage() {
+    if (!navigator.clipboard || !navigator.clipboard.read) return null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 300));
+      try {
+        for (const item of await navigator.clipboard.read()) {
+          const type = item.types.includes('image/png') ? 'image/png' : item.types.find((t) => t.startsWith('image/'));
+          if (type) return await item.getType(type);
+        }
+      } catch (err) {
+        console.warn('Direct clipboard read failed:', err);
+      }
+    }
+    return null;
+  }
+
+  // Tries each candidate until one decodes.
+  async function loadFirstImage({ blobs, urls }, allowClipboardRead) {
+    let lastErr = null;
+    for (const blob of blobs) {
+      try { return await loadImageFromBlob(blob); } catch (err) { lastErr = err; console.warn(err); }
+    }
+    for (const url of urls) {
+      try {
+        const img = await imageFromUrl(url, !url.startsWith('data:'));
+        if (lastImageUrl) { URL.revokeObjectURL(lastImageUrl); lastImageUrl = null; }
+        return img;
+      } catch (err) { lastErr = err; console.warn(err); }
+    }
+    if (allowClipboardRead) {
+      const blob = await readClipboardImage();
+      if (blob) {
+        try { return await loadImageFromBlob(blob); } catch (err) { lastErr = err; console.warn(err); }
+      }
+    }
+    throw new Error(lastErr
+      ? 'Could not read the image (' + lastErr.message + '). Copy the screenshot again and paste once more.'
+      : 'No image found in what was pasted. Copy the screenshot itself (not a file or a link) and paste again.');
+  }
+
+  const errorText = (err) => (err && err.message) || String(err || 'unknown error');
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const withTimeout = (promise, ms, what) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(what + ' timed out after ' + ms / 1000 + ' s')), ms)),
+  ]);
+
+  // detect.js caches its OCR worker, including a failed start, for the whole
+  // session; then every count silently reads as 1. Clear a failed one so the
+  // next attempt starts fresh.
+  function resetOcrIfBroken() {
+    try {
+      if (typeof getOcrWorker !== 'function' || typeof ocrWorkerPromise === 'undefined') return Promise.resolve();
+      return Promise.race([getOcrWorker(), sleep(15000).then(() => { throw new Error('OCR start timed out'); })])
+        .then(() => {}, (err) => {
+          console.warn('Text reader failed to start; it will be restarted.', err);
+          ocrWorkerPromise = null; // eslint-disable-line no-global-assign
+        });
+    } catch (err) { return Promise.resolve(); }
+  }
+
+  const DETECT_TIMEOUT_MS = 45000;
+  let detecting = false;   // a detection is in progress
+  let queued = false;      // a newer screenshot (or Re-detect) arrived meanwhile
+  let firstDetection = true;
+
+  // One detection of `image`, retried once if it throws or stalls.
+  async function detectWithRetry(image, config) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await withTimeout(detectEnemies(image, config, enemyNames), DETECT_TIMEOUT_MS, 'Detection');
+      } catch (err) {
+        console.error(`Detection attempt ${attempt} failed:`, err);
+        if (attempt >= 2) throw err;
+        setStatus('Detection hit a problem (' + errorText(err) + '); trying once more…');
+        await resetOcrIfBroken();
+        await sleep(300);
+      }
     }
   }
 
-  async function handleImageBlob(blob) {
+  // Runs detection on the latest screenshot. Only one detection runs at a time:
+  // pasting again while one is running queues the newest image instead of
+  // starting a second detection that competes with the first.
+  async function runDetection() {
+    if (!lastImage) { setStatus('Paste or choose a screenshot first.'); return; }
+    if (detecting) {
+      queued = true;
+      setStatus('Still reading the previous screenshot; the newest one is next. No need to paste again.');
+      return;
+    }
+    detecting = true;
     try {
-      lastImage = await loadImageFromBlob(blob);
+      await modelReady;
+      do {
+        queued = false;
+        const image = lastImage;
+        const t0 = performance.now();
+        setStatus(firstDetection
+          ? 'Reading the screenshot… (the first one is slower while icons and the text reader load)'
+          : 'Reading the screenshot…');
+        showMessage('');
+        // The "Minimum match score" box in Advanced debug sets detect.js's minScore
+        const minScore = Number($('threshold').value);
+        const config = minScore > 0 && minScore <= 1 ? { minScore } : {};
+
+        let found;
+        try {
+          found = await detectWithRetry(image, config);
+        } catch (err) {
+          if (!queued) {
+            setStatus('Detection failed: ' + errorText(err) +
+              '. Press Re-detect in Advanced debug to try again, or enter the teams by hand.', true);
+          }
+          continue;
+        }
+        firstDetection = false;
+        if (queued) continue; // a newer screenshot arrived; show that one instead
+
+        if (found.debugCanvas) showPreview(found.debugCanvas);
+        setTeam('A', found.left);
+        setTeam('B', found.right);
+        resultsEl.style.display = '';
+
+        const secs = ((performance.now() - t0) / 1000).toFixed(1);
+        if (found.left.length && found.right.length) {
+          setStatus(`Found ${found.left.length} enemy type(s) on the left and ${found.right.length} on the right ` +
+            `in ${secs} s. Check the names and counts, then Predict again if you change anything.`);
+          predict();
+        } else {
+          setStatus('Could not find enemies on both sides. Enter the teams by hand, or open Advanced debug to see what was detected.', true);
+        }
+      } while (queued);
+    } catch (err) {
+      console.error(err);
+      setStatus('Detection failed: ' + errorText(err), true);
+    } finally {
+      detecting = false;
+    }
+  }
+
+  async function handleImage(candidates, allowClipboardRead) {
+    try {
+      lastImage = await loadFirstImage(candidates, allowClipboardRead);
       showPreview(lastImage);
       await runDetection();
     } catch (err) {
       console.error(err);
-      setStatus(err.message, true);
+      setStatus(errorText(err), true);
     }
   }
 
@@ -339,27 +510,26 @@
   // Wiring
   // --------------------------------------------------------------------------
   document.addEventListener('paste', (ev) => {
-    const items = (ev.clipboardData && ev.clipboardData.items) || [];
-    for (const item of items) {
-      if (item.type && item.type.startsWith('image/')) {
-        ev.preventDefault();
-        handleImageBlob(item.getAsFile());
-        return;
-      }
-    }
+    const cand = imageCandidates(ev.clipboardData);
+    const types = Array.from((ev.clipboardData && ev.clipboardData.types) || []);
+    const typing = ev.target && /^(INPUT|TEXTAREA)$/.test(ev.target.tagName);
+    // Leave ordinary text pastes into the name / count boxes alone
+    if (!cand.blobs.length && !cand.urls.length && (typing || types.includes('text/plain'))) return;
+    ev.preventDefault();
+    handleImage(cand, true);
   });
 
   $('fileInput').addEventListener('change', (ev) => {
-    const file = ev.target.files && ev.target.files[0];
-    if (file) handleImageBlob(file);
+    const files = Array.from(ev.target.files || []);
+    if (files.length) handleImage({ blobs: files, urls: [] }, false);
+    ev.target.value = ''; // so choosing the same file again still triggers
   });
 
   const pasteArea = $('paste-area');
   pasteArea.addEventListener('dragover', (ev) => ev.preventDefault());
   pasteArea.addEventListener('drop', (ev) => {
     ev.preventDefault();
-    const file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) handleImageBlob(file);
+    handleImage(imageCandidates(ev.dataTransfer), false);
   });
 
   makeToggle(debugToggle, debugPanel);

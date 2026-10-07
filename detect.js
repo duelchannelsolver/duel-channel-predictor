@@ -42,7 +42,7 @@ const DEFAULTS = {
                           // minScore is what really rejects empties (they score ~0 vs real icons 0.85+).
   slashFrac: 0.85,        // empty slots show a thin light diagonal slash; >= this fraction of samples along it => empty
   slashMin: 6,            // luminance by which the slash must beat both flanks
-  minScore: 0.60,         // best NCC below this => unknown, skipped (real icons score 0.85+)
+  minScore: 0.50,         // best NCC below this => unknown, skipped (real icons score 0.85+)
   debug: true,
 };
 

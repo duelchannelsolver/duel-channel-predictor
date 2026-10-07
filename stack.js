@@ -2,21 +2,26 @@
  * DuelStackModel (stack.js) - Browser & Node.js Universal Version
  * Mounts to window.DuelStackModel, global.DuelStackModel, and module.exports.
  *
- * v4
- *  - Combat simulator: a 2-D battle that models about 25 special mechanics
- *    parsed from each enemy's ability text (instant kills, one-shot attackers,
- *    on-death explosions and spawns, revives and second forms, stuns and cold,
- *    burn and damage-over-time, DEF shred, ammo, lifesteal, thorns, periodic
- *    skills and more). Its results are fed to every base model as features.
+ * v5
+ *  - Combat simulator: a 2-D battle on a field about 10 tiles square, with the
+ *    two teams starting spread along opposite edges. It models about 25 special
+ *    mechanics parsed from each enemy's ability text: instant kills, one-shot
+ *    attackers, on-death explosions and spawns, revives and second forms, stuns,
+ *    Cold and Freeze, burn and damage-over-time, DEF shred, ammo, lifesteal,
+ *    thorns, aggression levels, channelled bursts, spins and more. Each matchup
+ *    is simulated 9 times and the results are fed to both models as features.
  *  - Ensemble: equal-weight logit average of a "wide" L2-regularised logistic
  *    regression (unit counts + team stats + simulator) and gradient-boosted
- *    trees. Options: { useNN: true } adds the neural net as a third model,
+ *    trees. Options: { useNN: true } adds a neural net as a third model,
  *    { stacking: true } fits the ensemble weights instead of using equal ones.
  *  - Storm is not a model input (it is only known after the match). The `storm`
  *    argument of predict* is accepted and ignored; storm-flagged training rows
  *    are down-weighted (stormWeight).
  *  - predictDetailed().weights is ordered [wide, nn, xgb]; `nn` is null unless
  *    the neural net is enabled.
+ *  - A saved model (toJSON / fromJSON, see train.js) only matches the stack.js
+ *    that trained it. Whenever this file changes, re-run train.js. fromJSON
+ *    sets `outdated = true` on a model saved by a different simulator version.
  */
 (function (global) {
   'use strict';
@@ -280,6 +285,8 @@
     if ((m = /regenerates (\d+) hp/.exec(text))) s.regen += parseFloat(m[1]);
     if ((m = /loses (\d+) hp every second/.exec(text))) s.regen -= parseFloat(m[1]);
 
+    if ((m = /has \+(\d+) aggression level/.exec(text))) s.aggro = parseFloat(m[1]);
+
     // One-shot / instant-kill attackers
     if (/launching itself/.test(text)) s.suicide = true;
     if (/devours the target when attacking for the first time/.test(text)) s.devourFirst = true;
@@ -309,6 +316,7 @@
       s.coldEvery = { n: numWord(m[1]), dur: parseFloat(m[2]) };
     }
     if (/immune to stun/.test(text)) s.stunImmune = true;
+    if (/immune to (stun and )?freeze/.test(text)) s.freezeImmune = true;
     if (/status resistance/.test(text)) s.statusRes = true;
 
     // Damage-over-time, thorns, debuffs
@@ -343,13 +351,15 @@
     }
     // Periodic skills
     if ((m = /channels for (\d+) seconds before unleashing a burst[^]*?deals (\d+)% atk arts damage[^]*?cooldown: \((\d+)\) (\d+) sec/.exec(text))) {
-      s.skill = { first: parseFloat(m[3]) + parseFloat(m[1]), cd: parseFloat(m[4]) + parseFloat(m[1]), mult: parseFloat(m[2]) / 100, phys: 0, radius: 1.5, stun: 0, range: s.range };
+      s.skill = { first: parseFloat(m[3]), cd: parseFloat(m[4]), channel: parseFloat(m[1]), mult: parseFloat(m[2]) / 100, phys: 0, radius: 1.5, stun: 0, range: s.range };
     }
     if ((m = /range of ([\d.]+), dealing (\d+)% atk physical damage and stunning the target for (\d+) seconds\. cooldown: (\d+) sec/.exec(text))) {
       s.skill = { first: parseFloat(m[4]), cd: parseFloat(m[4]), mult: parseFloat(m[2]) / 100, phys: 1, radius: 0, stun: parseFloat(m[3]), range: parseFloat(m[1]) };
     }
-    if ((m = /spins for[^]*?radius of ([\d.]+) takes (\d+)% atk physical damage every second[^]*?cooldown: (\d+) sec/.exec(text))) {
-      s.aura = { radius: parseFloat(m[1]), mult: parseFloat(m[2]) / 100, start: parseFloat(m[3]) };
+    // Spin: after a recharge the unit spins for a long time, hitting everything
+    // in contact once a second instead of attacking normally
+    if ((m = /spins for (\d+) seconds[^]*?radius of ([\d.]+) takes (\d+)% atk physical damage every second[^]*?cooldown: (\d+) sec/.exec(text))) {
+      s.aura = { dur: parseFloat(m[1]), radius: parseFloat(m[2]), mult: parseFloat(m[3]) / 100, cd: parseFloat(m[4]) };
     }
     if (/has status resistance and \+100 aspd/.test(text)) s.ai = s.ai / 2;
 
@@ -391,11 +401,13 @@
         atk: u.atk, def: u.def, res: u.res + (mech && s.resBonus ? s.resBonus : 0),
         ai: s.ai, ms: s.ms, range: s.range, phys: s.phys, hits: 1,
         cd: rng() * s.ai * 0.5, pend: 0, kill: false,
-        stunT: 0, coldT: 0, invT: 0, dodgeT: 0, reviveT: 0, revived: false,
+        stunT: 0, coldT: 0, frozenT: 0, invT: 0, dodgeT: 0, reviveT: 0, revived: false,
         nAtk: 0, ammo: 0, ammoMult: 1, imprisoned: false, ignoreDef: 0,
         burn: 0, dotT: 0, dotDps: 0, shieldT: 0, rageT: 0, raged: false,
         opener: null, devoured: false, splitDone: false, dodged: false,
         avenge: 0, age: 0, trio: false, enraged: false, skillT: s.skill ? s.skill.first : 0,
+        spinT: 0, spinCd: s.aura ? s.aura.cd : 0, spinTick: 0,
+        chanT: 0, chanX: 0, chanY: 0,
       };
       if (mech) {
         if (s.ammo && !off.ammo) { e.ammo = s.ammo.n; e.ammoMult = s.ammo.mult; }
@@ -437,9 +449,18 @@
       if (t.s.stunImmune) return;
       t.stunT = Math.max(t.stunT, t.s.statusRes ? dur / 2 : dur);
     };
+    // Cold slows attacks (-30 ASPD). Cold applied to a unit that is already Cold
+    // freezes it for the duration of that second Cold; Cold applied to a Frozen
+    // unit refreshes the freeze. Cold itself is never refreshed.
     const applyCold = (t, dur) => {
       if (t.s.statusRes) dur /= 2;
-      if (t.coldT > 0) { applyStun(t, dur); t.coldT = 0; } else t.coldT = dur; // Cold twice = Frozen
+      if (t.s.freezeImmune) { if (t.coldT <= 0) t.coldT = dur; return; }
+      if (t.frozenT > 0 || t.coldT > 0) {
+        t.frozenT = dur; t.coldT = 0;
+        t.stunT = Math.max(t.stunT, dur); // a frozen unit cannot move or attack
+      } else {
+        t.coldT = dur;
+      }
     };
     // Queue damage from src (may be null) onto t; returns the amount queued.
     const strike = (src, t, raw, phys, ignoreDef) => {
@@ -489,6 +510,7 @@
         if (e.invT > 0) e.invT -= dt;
         if (e.dodgeT > 0) e.dodgeT -= dt;
         if (e.coldT > 0) e.coldT -= dt;
+        if (e.frozenT > 0) e.frozenT -= dt;
         if (e.rageT > 0) e.rageT -= dt;
         if (e.shieldT > 0) { e.shieldT -= dt; if (e.shieldT <= 0) e.def = Math.max(0, e.def - e.s.tempDef.def); }
         if (mech && e.s.regen) e.pend -= e.s.regen * dt;
@@ -499,15 +521,48 @@
       for (let i = 0; i < N; i++) {
         const e = E[i];
         if (!isUp(e)) continue;
+
+        // Spin (walks normally until the recharge ends, then spins, still walking
+        // toward enemies). A stun or freeze pauses the spin's damage; it resumes
+        // as soon as the stun ends, until the spin's time is up.
+        let spinning = false;
+        if (mech && e.s.aura && !off.aura) {
+          const a = e.s.aura;
+          if (e.spinT > 0) {
+            spinning = true;
+            e.spinT -= dt;
+            if (e.stunT <= 0) e.spinTick += dt;
+            if (e.stunT <= 0 && e.spinTick >= 1 - 1e-9) {
+              e.spinTick -= 1;
+              const raw = curAtk(e) * a.mult;
+              for (let j = 0; j < N; j++) {
+                const o = E[j];
+                if (o.side !== e.side && isUp(o) && dist(e, o.pos, o.y) <= a.radius) strike(e, o, raw, 1, 0);
+              }
+            }
+            if (e.spinT <= 0) e.spinCd = a.cd;
+          } else {
+            e.spinCd -= dt;
+            if (e.spinCd <= 0) { e.spinT = a.dur; e.spinTick = 0; spinning = true; }
+          }
+        }
+
         if (e.stunT > 0) { e.stunT -= dt; continue; }
-        let tg = null, bd = Infinity;
+        // Target: the nearest enemy, except that an enemy with a higher aggression
+        // level that is already within attack range is attacked first (taunt).
+        let tg = null, bd = Infinity, tt = null, td = Infinity, ta = 0;
+        const useAggro = mech && !off.aggro;
         for (let j = 0; j < N; j++) {
           const o = E[j];
           if (o.side === e.side || !isUp(o)) continue;
           const dd = dist(e, o.pos, o.y);
           if (dd < bd) { bd = dd; tg = o; }
+          if (useAggro && o.s.aggro && dd <= e.range && (o.s.aggro > ta || (o.s.aggro === ta && dd < td))) {
+            ta = o.s.aggro; td = dd; tt = o;
+          }
         }
         if (!tg) continue;
+        if (tt) { tg = tt; bd = td; }
         const s = e.s;
         let rate = 1;
         if (e.coldT > 0) rate *= 0.7;
@@ -518,6 +573,20 @@
 
         // Periodic skill (channelled burst, boulder)
         if (mech && s.skill && !off.skill) {
+          // A channelled burst lands where its target stood when the channel
+          // began, so enemies that have walked away since are not hit.
+          if (e.chanT > 0) {
+            e.chanT -= dt;
+            if (e.chanT <= 0) {
+              const k = s.skill, raw = curAtk(e) * k.mult;
+              for (let j = 0; j < N; j++) {
+                const o = E[j];
+                if (o.side !== e.side && isUp(o) && dist(o, e.chanX, e.chanY) <= k.radius) strike(e, o, raw, k.phys, 0);
+              }
+              e.skillT = k.cd;
+            }
+            continue; // busy channelling: no moving or attacking
+          }
           e.skillT -= dt;
           if (e.skillT <= 0) {
             const k = s.skill;
@@ -530,7 +599,10 @@
             }
             if (st && dist(e, st.pos, st.y) <= k.range) {
               const raw = curAtk(e) * k.mult, cx = st.pos, cy = st.y;
-              if (k.radius > 0) {
+              if (k.channel) {
+                e.chanT = k.channel; e.chanX = cx; e.chanY = cy;
+                continue;
+              } else if (k.radius > 0) {
                 for (let j = 0; j < N; j++) {
                   const o = E[j];
                   if (o.side !== e.side && isUp(o) && dist(o, cx, cy) <= k.radius) strike(e, o, raw, k.phys, 0);
@@ -543,23 +615,6 @@
             }
           }
         }
-        // Damage aura that replaces normal attacks once it starts (spin)
-        if (mech && s.aura && !off.aura && e.age >= s.aura.start) {
-          const raw = curAtk(e) * s.aura.mult * dt;
-          for (let j = 0; j < N; j++) {
-            const o = E[j];
-            if (o.side !== e.side && isUp(o) && dist(e, o.pos, o.y) <= s.aura.radius) {
-              const d = Math.max(raw - o.def * dt, 0.05 * raw);
-              if (o.invT <= 0 && o.dodgeT <= 0) o.pend += d;
-            }
-          }
-          if (bd > s.aura.radius * 0.6) {
-            const mv = Math.min(e.ms * dt * opt.moveScale, bd);
-            if (bd > 1e-9) { e.pos += ((tg.pos - e.pos) / bd) * mv; e.y += ((tg.y - e.y) / bd) * mv; }
-          }
-          continue;
-        }
-
         // One-off ranged opener (snowball, RPG)
         if (e.opener && bd <= e.opener.range) {
           const raw = curAtk(e) * e.opener.mult, cx = tg.pos, cy = tg.y;
@@ -579,6 +634,7 @@
           if (bd > 1e-9) { e.pos += ((tg.pos - e.pos) / bd) * mv; e.y += ((tg.y - e.y) / bd) * mv; }
           continue;
         }
+        if (spinning) continue; // disarmed while spinning
         if (e.cd > 0) continue;
 
         // --- attack ---------------------------------------------------------
@@ -692,7 +748,7 @@
           if (s.revive && !off.revive && !e.revived) {
             e.revived = true; e.reviveT = s.revive.delay; e.invT = s.revive.inv;
             e.hp = e.hp0 * s.revive.frac;
-            e.stunT = 0; e.coldT = 0; e.dotT = 0; e.burn = 0;
+            e.stunT = 0; e.coldT = 0; e.frozenT = 0; e.dotT = 0; e.burn = 0;
             const f = s.form2;
             if (f) {
               if (f.phys !== undefined) e.phys = f.phys;
@@ -719,6 +775,10 @@
     for (const e of E) if (e.hp > 0) rem[e.side] += e.hp;
     return Math.min(1, rem[0] / tot[0]) - Math.min(1, rem[1] / tot[1]);
   }
+
+  // Bump whenever the simulator or the features change: saved models from an
+  // older version would silently give wrong predictions with the new code.
+  const SIM_VERSION = 5;
 
   const SIM_DIM = 4; // [mean margin, mean win sign, signed sqrt margin, margin without mechanics]
 
@@ -765,6 +825,59 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Predictors rebuilt from plain (JSON-serialisable) parameters
+  // ---------------------------------------------------------------------------
+  function wideModel(w) {
+    return { w, predictRow: (x) => sigmoid(dot(w, x)) };
+  }
+
+  function xgbModel(trees) {
+    // sign = +1 scores x, sign = -1 scores the mirrored row (-x)
+    const margin = (x, sign) => {
+      let m = 0;
+      for (let i = 0; i < trees.length; i++) {
+        let node = trees[i];
+        while (node.leaf === undefined) node = sign * x[node.f] <= node.t ? node.l : node.r;
+        m += node.leaf;
+      }
+      return m;
+    };
+    return {
+      trees,
+      predictRow: (x) => 0.5 * (sigmoid(margin(x, 1)) + (1 - sigmoid(margin(x, -1)))),
+    };
+  }
+
+  // state: { sizes, W, b, mean, std, clip }
+  function nnMember(state) {
+    const net = new BrowserMLP(state.sizes, () => 0.5);
+    net.W = state.W.map((w) => Float64Array.from(w));
+    net.b = state.b.map((b) => Float64Array.from(b));
+    const mean = state.mean, std = state.std, clip = state.clip, dim = mean.length;
+    const normVec = (v) => {
+      const out = new Float64Array(dim);
+      for (let j = 0; j < dim; j++) out[j] = clamp((v[j] - mean[j]) / std[j], -clip, clip);
+      return out;
+    };
+    // Average the two orientations so swapping the teams gives exactly 1 - p
+    return {
+      state,
+      predictPair: (f, w) => 0.5 * (net.predict(normVec(f)) + (1 - net.predict(normVec(w)))),
+    };
+  }
+
+  function nnModel(members) {
+    return {
+      members,
+      predictPair: (f, w) => {
+        let sum = 0;
+        for (const mm of members) sum += mm.predictPair(f, w);
+        return sum / members.length;
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Master Stacking Classifier Class
   // ---------------------------------------------------------------------------
   class DuelStackModel {
@@ -795,10 +908,11 @@
       this.wideIters = options.wideIters ?? 600;
 
       // Simulator
-      this.simSeeds = Math.max(1, (options.simSeeds ?? 3) | 0);
+      // 9 simulated battles per matchup: fewer makes the simulator features noisy
+      this.simSeeds = Math.max(1, (options.simSeeds ?? 9) | 0);
       this.simOpt = {
         arenaLength: options.simArenaLength ?? 10,
-        arenaWidth: options.simArenaWidth ?? 4,
+        arenaWidth: options.simArenaWidth ?? 10, // teams start spread over the full height of the field
         spawnSpread: options.simSpawnSpread ?? 3,
         dt: options.simDt ?? 0.2,
         maxTime: options.simMaxTime ?? 400,
@@ -940,10 +1054,12 @@
         }
       }
 
-      // Average the two orientations so swapping the teams gives exactly 1 - p
-      return {
-        predictPair: (f, w) => 0.5 * (net.predict(normVec(f)) + (1 - net.predict(normVec(w)))),
-      };
+      return nnMember({
+        sizes: net.sizes,
+        W: net.W.map((w) => Array.from(w)),
+        b: net.b.map((b) => Array.from(b)),
+        mean: Array.from(mean), std: Array.from(std), clip,
+      });
     }
 
     _trainNN(fwd, swp, y, sw, rng) {
@@ -952,13 +1068,7 @@
       for (let i = 0; i < k; i++) {
         members.push(this._trainNNOnce(fwd, swp, y, sw, mulberry32(Math.floor(rng() * 2147483647))));
       }
-      return {
-        predictPair: (f, w) => {
-          let sum = 0;
-          for (const mm of members) sum += mm.predictPair(f, w);
-          return sum / members.length;
-        },
-      };
+      return nnModel(members);
     }
 
     _trainWide(rows, y, sw) {
@@ -976,7 +1086,7 @@
       const ws = fitLogistic(scaled, y, sw, this.wideL2, this.wideIters);
       const w = new Float64Array(d);
       for (let j = 0; j < d; j++) w[j] = ws[j] / scale[j];
-      return { predictRow: (x) => sigmoid(dot(w, x)) };
+      return wideModel(w);
     }
 
     _trainXGB(rows, yIn, swIn, rng) {
@@ -1047,12 +1157,6 @@
         while (node.leaf === undefined) node = X[off + node.f] <= node.t ? node.l : node.r;
         return node.leaf;
       };
-      // sign = +1 scores x, sign = -1 scores the mirrored row (-x)
-      const vecScore = (node, x, sign) => {
-        while (node.leaf === undefined) node = sign * x[node.f] <= node.t ? node.l : node.r;
-        return node.leaf;
-      };
-
       const raw = new Float64Array(nTotal);
       const g = new Float64Array(nTotal), h = new Float64Array(nTotal);
       const trees = [];
@@ -1072,22 +1176,13 @@
         for (let i = 0; i < nTotal; i++) raw[i] += rowScore(tree, i * d);
       }
 
-      const margin = (x, sign) => {
-        let m = 0;
-        for (let i = 0; i < trees.length; i++) m += vecScore(trees[i], x, sign);
-        return m;
-      };
-
-      return {
-        predictRow: (x) => 0.5 * (sigmoid(margin(x, 1)) + (1 - sigmoid(margin(x, -1)))),
-      };
+      return xgbModel(trees);
     }
 
     // --- Fit / predict -------------------------------------------------------
 
-    fit(matches, enemiesData) {
-      if (!matches || !matches.length) throw new Error('No matches provided');
-
+    // Builds the unit lookup (and simulator cache) from the enemies data
+    _setEnemies(enemiesData) {
       const lookup = new Map();
       const add = (k, u) => {
         if (!lookup.has(k)) lookup.set(k, []);
@@ -1116,6 +1211,12 @@
       } else {
         this.simCache = new Map();
       }
+    }
+
+    fit(matches, enemiesData, onProgress) {
+      if (!matches || !matches.length) throw new Error('No matches provided');
+
+      this._setEnemies(enemiesData);
 
       const eSet = new Set();
       for (const m of matches) {
@@ -1132,6 +1233,7 @@
       for (let s = 0; s < n; s++) {
         const m = matches[s];
         rows[s] = this._row(m.teamA, m.teamB);
+        if (onProgress && (s % 25 === 0 || s === n - 1)) onProgress((s + 1) / n);
         if (useNN) {
           nnFwd[s] = this._nnRow(m.teamA, m.teamB);
           nnSwp[s] = this._nnRow(m.teamB, m.teamA);
@@ -1225,6 +1327,47 @@
         rf: pXGB,          // legacy alias
         weights: this.weights,
       };
+    }
+
+    // --- Save / load ----------------------------------------------------------
+
+    // Plain object holding everything needed to predict (use JSON.stringify on it).
+    toJSON() {
+      if (!this.modelWide) throw new Error('Model has not been fitted');
+      return {
+        format: 'DuelStackModel', version: 5, simVersion: SIM_VERSION,
+        options: {
+          useNN: this.useNN, simSeeds: this.simSeeds,
+          simArenaLength: this.simOpt.arenaLength, simArenaWidth: this.simOpt.arenaWidth,
+          simSpawnSpread: this.simOpt.spawnSpread, simDt: this.simOpt.dt,
+          simMaxTime: this.simOpt.maxTime, simMoveScale: this.simOpt.moveScale,
+          simDisabled: this.simOpt.disabled,
+        },
+        enemies: this.enemies,
+        weights: this.weights,
+        wide: Array.from(this.modelWide.w),
+        xgb: this.modelXGB.trees,
+        nn: this.modelNN ? this.modelNN.members.map((mm) => mm.state) : null,
+      };
+    }
+
+    // Rebuilds a trained model without training. `saved` is the object (or JSON
+    // string) from toJSON(); `enemiesData` is the same enemies array used to train.
+    static fromJSON(saved, enemiesData) {
+      const o = typeof saved === 'string' ? JSON.parse(saved) : saved;
+      if (!o || o.format !== 'DuelStackModel') throw new Error('Not a saved DuelStackModel');
+      const model = new DuelStackModel(o.options || {});
+      model.outdated = o.simVersion !== SIM_VERSION;
+      if (model.outdated && typeof console !== 'undefined') {
+        console.warn('This saved model was trained with a different version of stack.js. Re-run train.js.');
+      }
+      model._setEnemies(enemiesData);
+      model.enemies = o.enemies;
+      model.weights = o.weights;
+      model.modelWide = wideModel(Float64Array.from(o.wide));
+      model.modelXGB = xgbModel(o.xgb);
+      model.modelNN = o.nn ? nnModel(o.nn.map(nnMember)) : null;
+      return model;
     }
 
     predictProba(teamA, teamB, storm = false) {

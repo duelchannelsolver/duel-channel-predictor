@@ -22,7 +22,7 @@
     <p>These bound a wide search area on each side (not exact icon positions -- detection scans within them), in % of image size. Icon size is the approximate diameter of one enemy icon.</p>
     <label>Left band: x<input id="lx" type="number" value="18" size="3">% y<input id="ly" type="number" value="82" size="3">% w<input id="lw" type="number" value="30" size="3">% h<input id="lh" type="number" value="13" size="3">%</label><br>
     <label>Right band: x<input id="rx" type="number" value="52" size="3">% y<input id="ry" type="number" value="82" size="3">% w<input id="rw" type="number" value="30" size="3">% h<input id="rh" type="number" value="13" size="3">%</label><br>
-    <label>Icon size: <input id="iconSize" type="number" value="5.5" step="0.5" size="3">% of image width &nbsp; Match threshold: <input id="threshold" type="number" value="0.85" step="0.01" size="4"></label>
+    <label>Icon size: <input id="iconSize" type="number" value="5.5" step="0.5" size="3">% of image width &nbsp; Minimum match score: <input id="threshold" type="number" value="0.5" min="0" max="1" step="0.01" size="4"> (icons scoring below this are ignored)</label>
     <button id="redetect">Re-detect</button>
   </section>
   </div>
